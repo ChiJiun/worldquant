@@ -8,6 +8,7 @@ Use these files for this workspace:
 - `app/search.py`: `GeneticSearchEngine` and MCTS skeleton.
 - `app/pipeline/runner.py`: end-to-end candidate processing, quality gate, simulation, scoring, storage.
 - `app/scoring.py`: reward and high/medium/low quality classifier.
+- `app/catalog.py`: authenticated BRAIN `/data-fields` and `/operators` sync into `config/fields.json`.
 - `app/storage.py`: SQLite persistence, CSV outputs, best alpha export, dashboard.
 - SQLite tables: `research_hypotheses`, `alpha_templates`, `submittable_alphas`, plus existing alpha/simulation/metric tables.
 - `app/quality.py`: pre-simulation expression filters.

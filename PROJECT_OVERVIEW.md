@@ -21,6 +21,12 @@ Core loop:
 
 ## Commands
 
+Sync the WorldQuant BRAIN field/operator catalog after local `.env` credentials are valid:
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app catalog-sync --output config\fields.json
+```
+
 Run the research workflow after a hypothesis JSON exists:
 
 ```powershell
@@ -52,6 +58,7 @@ C:\Users\USER\anaconda3\python.exe -m pytest
 - `app/workflow.py`: hypothesis JSON -> simulate -> triage -> template/submittable DB.
 - `app/storage.py`: SQLite tables and CSV outputs.
 - `app/scoring.py`: submission gates, refinement triage, high/medium/low tiers.
+- `app/catalog.py`: authenticated BRAIN catalog sync for data fields/operators.
 - `app/pipeline/runner.py`: GA simulation path.
 - `config/templates.json`: vetted GA template config; may be `{}`.
 - `.codex/skills/alpha-discovery-workflow`: agent operating procedure.

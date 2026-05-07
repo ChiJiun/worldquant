@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from app.api import RateLimiter, build_client
+from app.catalog import BrainCatalogSync
 from app.config import Settings
 from app.dedupe import DedupeService
 from app.logging_utils import configure_logging
@@ -76,6 +77,10 @@ def make_parser() -> argparse.ArgumentParser:
     session_report.add_argument("--limit", type=int, default=10)
     dashboard = subparsers.add_parser("dashboard", help="Write a markdown session dashboard")
     dashboard.add_argument("--limit", type=int, default=10)
+    catalog_sync = subparsers.add_parser("catalog-sync", help="Fetch WorldQuant BRAIN data fields/operators into config/fields.json")
+    catalog_sync.add_argument("--output", default=None, help="Output catalog path, defaults to WQ_FIELDS_CONFIG")
+    catalog_sync.add_argument("--limit", type=int, default=50)
+    catalog_sync.add_argument("--no-operators", action="store_true")
     for command_name in ("workflow", "alpha-workflow"):
         workflow = subparsers.add_parser(command_name, help="Run agent-discovered hypotheses through simulate, quality tiering, and reporting")
         workflow.add_argument("--hypotheses", required=True, help="Path to JSON produced by the hypothesis scout")
@@ -92,6 +97,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     settings = Settings.load(Path.cwd())
+    if args.command == "catalog-sync":
+        path = Path(args.output) if args.output else settings.fields_config
+        sync = BrainCatalogSync(settings, path, limit=args.limit)
+        print(sync.run(include_operators=not args.no_operators))
+        return 0
     if args.command in {"workflow", "alpha-workflow"}:
         runner = AlphaDiscoveryWorkflow(settings)
         try:

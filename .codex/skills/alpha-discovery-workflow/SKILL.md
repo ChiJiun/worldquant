@@ -25,6 +25,7 @@ The hypothesis scout must write JSON in the schema shown in `references/hypothes
 Other local commands:
 
 ```powershell
+C:\Users\USER\anaconda3\python.exe -m app catalog-sync --output config\fields.json
 C:\Users\USER\anaconda3\python.exe -m app login-check
 C:\Users\USER\anaconda3\python.exe -m app generate --count 10
 C:\Users\USER\anaconda3\python.exe -m app search --generations 1
@@ -42,7 +43,7 @@ Procedure:
 
 1. Search the web for current academic papers, practitioner notes, WorldQuant community examples, and market microstructure observations. Prefer primary or technically concrete sources.
 2. Extract one mechanism per hypothesis: behavioral bias, information delay, liquidity provision, risk premium, accounting quality, event drift, or crowding reversal.
-3. Map the mechanism to available WorldQuant fields from `config/fields.json`.
+3. Map the mechanism to available WorldQuant fields from `config/fields.json`. If the catalog is still the stub version, run `catalog-sync` first and do not invent fields.
 4. Draft 3-8 FASTEXPR candidates from the same mechanism. Keep the field set small and economically coherent.
 5. Record why each candidate should work, expected horizon, likely failure mode, and suggested neutralization.
 6. Write the final candidate batch to `outputs/alpha_hypotheses.json`.
