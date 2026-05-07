@@ -35,6 +35,7 @@ class AlphaDiscoveryWorkflow:
 
     def run(self, hypotheses_path: Path, *, promote: bool = False) -> Path:
         payload = json.loads(hypotheses_path.read_text(encoding="utf-8"))
+        self._save_hypotheses(payload)
         alphas = self._load_alphas(payload)
         records: List[SimulationRecord] = []
         for alpha in alphas:
@@ -43,6 +44,11 @@ class AlphaDiscoveryWorkflow:
         if promote:
             self._write_promotable_families(records)
         return report_path
+
+    def _save_hypotheses(self, payload: Dict[str, Any]) -> None:
+        session_id = str(payload.get("session_id") or "")
+        for hypothesis in payload.get("hypotheses", []):
+            self.storage.save_research_hypothesis(session_id, hypothesis)
 
     def _load_alphas(self, payload: Dict[str, Any]) -> List[WorkflowAlpha]:
         loaded: List[WorkflowAlpha] = []
@@ -81,11 +87,12 @@ class AlphaDiscoveryWorkflow:
             status = str(terminal.get("status", "complete")).lower()
             result_id = str(terminal.get("alpha") or handle.simulation_id)
             metrics = self.client.fetch_result(result_id)
+            metrics.extras["triage_decision"] = self.scorer.triage_decision(metrics)
             metrics.extras["quality_tier"] = self.scorer.classify_quality(metrics)
             metrics.extras["hypothesis_id"] = alpha.hypothesis_id
             metrics.extras["family"] = alpha.family
             reward = self.scorer.score(metrics)
-            is_best = metrics.extras["quality_tier"] == "high"
+            is_best = metrics.extras["triage_decision"] == "submit_ready"
             record = SimulationRecord(
                 candidate=candidate,
                 handle=handle,
@@ -97,12 +104,14 @@ class AlphaDiscoveryWorkflow:
             self.storage.mark_status(alpha_id, "complete")
             self.storage.save_result(alpha_id, record, is_best=is_best)
             self.storage.append_run_summary(record)
+            self._record_template_decision(alpha, candidate, metrics, source="research_workflow")
             if is_best:
+                self.storage.save_submittable_alpha(candidate, metrics, source="research_workflow")
                 self.storage.append_best_alpha(candidate, metrics, reward)
             return record
         except Exception as exc:
             self.storage.mark_status(alpha_id, "failed")
-            metrics = SimulationMetrics(extras={"quality_tier": "low", "hypothesis_id": alpha.hypothesis_id, "family": alpha.family})
+            metrics = SimulationMetrics(extras={"triage_decision": "reject", "quality_tier": "not_submittable", "hypothesis_id": alpha.hypothesis_id, "family": alpha.family})
             record = SimulationRecord(
                 candidate=candidate,
                 handle=None,
@@ -115,6 +124,23 @@ class AlphaDiscoveryWorkflow:
             self.storage.save_result(alpha_id, record, is_best=False)
             self.storage.append_failure(candidate, str(exc))
             return record
+
+    def _record_template_decision(self, alpha: WorkflowAlpha, candidate: AlphaCandidate, metrics: SimulationMetrics, source: str) -> None:
+        decision = str((metrics.extras or {}).get("triage_decision", "reject"))
+        if decision == "reject":
+            return
+        status = "candidate" if decision == "refine_candidate" else "submit_ready"
+        self.storage.save_alpha_template(
+            family=alpha.family,
+            hypothesis_id=alpha.hypothesis_id,
+            seed_expression=candidate.expression,
+            rationale=alpha.rationale,
+            source=source,
+            status=status,
+            triage_decision=decision,
+            quality_tier=str((metrics.extras or {}).get("quality_tier", "")),
+            metrics=self.storage._metrics_payload(metrics),
+        )
 
     def _wait_for_completion(self, simulation_id: str) -> Dict[str, Any]:
         for _ in range(self.settings.max_poll_attempts):
@@ -136,13 +162,14 @@ class AlphaDiscoveryWorkflow:
             f"- promote: `{promote}`",
             f"- total: {len(records)}",
             "",
-            "| tier | status | family | sharpe | fitness | turnover | checks_failed | reward | expression |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| decision | tier | status | family | sharpe | fitness | turnover | checks_failed | reward | expression |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
         for record in sorted(records, key=lambda item: item.reward.value, reverse=True):
             extras = record.metrics.extras or {}
             lines.append(
-                "| {tier} | {status} | {family} | {sharpe:.4f} | {fitness:.4f} | {turnover:.4f} | {checks} | {reward:.4f} | `{expr}` |".format(
+                "| {decision} | {tier} | {status} | {family} | {sharpe:.4f} | {fitness:.4f} | {turnover:.4f} | {checks} | {reward:.4f} | `{expr}` |".format(
+                    decision=extras.get("triage_decision", "reject"),
                     tier=extras.get("quality_tier", "low"),
                     status=record.api_status,
                     family=record.candidate.template_type,
@@ -162,13 +189,15 @@ class AlphaDiscoveryWorkflow:
             {
                 "family": record.candidate.template_type,
                 "expression": record.candidate.expression,
+                "triage_decision": (record.metrics.extras or {}).get("triage_decision", ""),
+                "quality_tier": (record.metrics.extras or {}).get("quality_tier", ""),
                 "sharpe": record.metrics.sharpe,
                 "fitness": record.metrics.fitness,
                 "turnover": record.metrics.turnover,
                 "rationale": record.candidate.params.get("rationale", ""),
             }
             for record in records
-            if (record.metrics.extras or {}).get("quality_tier") == "high"
+            if (record.metrics.extras or {}).get("triage_decision") in {"submit_ready", "refine_candidate"}
         ]
         path = self.settings.output_dir / "promotable_families.json"
         path.write_text(json.dumps(rows, indent=2, ensure_ascii=True), encoding="utf-8")

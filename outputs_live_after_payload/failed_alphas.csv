@@ -1,6 +1,0 @@
-expression,template_type,error
-"ts_decay_linear(sub(ts_delta(close, 5), ts_decay_linear(ts_delta(adv20, 5), 3)), 5)",price_volume_divergence,Simulation failed with status: error
-"rank(group_neutralize(sub(vwap, ts_mean(vwap, 5)), subindustry))",mean_reversion,Simulation failed with status: error
-"rank(group_neutralize(sub(close, ts_mean(close, 40)), industry))",mean_reversion,Simulation failed with status: error
-"rank(sub(ts_rank(close, 120), ts_rank(close, 120)))",momentum,Simulation failed with status: error
-"rank(sub(ts_rank(vwap, 10), ts_rank(vwap, 120)))",momentum,Simulation failed with status: error

@@ -5,8 +5,11 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.venv/
+*.egg-info/
 
 data/
 outputs/
+outputs_*/
 logs/
 logs_old_*/

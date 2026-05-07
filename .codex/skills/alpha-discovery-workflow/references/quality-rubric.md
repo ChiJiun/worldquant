@@ -1,6 +1,6 @@
 # Alpha Quality Rubric
 
-Use this rubric after simulation. It is based on commonly shared WorldQuant BRAIN requirements and community automation thresholds:
+Use this rubric after simulation. Separate submit/refine/reject triage from quality tiers.
 
 - USA Delay-1 passing floor: Sharpe above 1.25, Fitness above 1.0, Turnover between 1% and 70%.
 - Delay-0 usually needs stricter Sharpe and Fitness.
@@ -14,29 +14,58 @@ References checked on 2026-05-07:
 - xiegengcai/world-quant-brain DeepWiki: selection criteria and failure/correlation filtering.
 - Public WorldQuant IQC page: scoring depends on submitted alpha quality and quantity, but exact platform checks remain in BRAIN.
 
-## Tiers
+## Triage
+
+### submit_ready
+
+The alpha passes platform-style gates:
+
+- no failed checks
+- behavior similarity below the duplicate threshold
+- USA Delay-1: Sharpe >= 1.25, Fitness >= 1.0, Turnover 1%-70%
+- stricter Delay-0/CHN floors when applicable
+
+### refine_candidate
+
+The alpha does not pass submission gates yet, but is close enough to improve:
+
+- no failed checks
+- behavior similarity < 0.7
+- Sharpe >= 0.8
+- Fitness >= 0.5
+- Turnover 0.5%-80%
+- economic mechanism is coherent
+
+### reject
+
+Failed checks, weak economics, duplicate behavior, extreme turnover, or too far from submission.
+
+## Quality Tiers
+
+Only assign high/medium/low after `submit_ready` is true. A low quality alpha still passes submission gates.
 
 ### high
 
-Use for direct family promotion candidates:
+Use for expert-level submission candidates:
 
-- `checks_failed == 0`
-- behavior similarity `< 0.55`
-- USA D1: Sharpe `>= 1.58`, Fitness `>= 1.3`, Turnover `1%..40%`
-- Delay-0 or CHN: use stricter platform floors, then require a buffer above those floors
-- Economic mechanism is clear and parameterizable
+- Sharpe >= 2.0
+- Fitness >= 1.3
+- Turnover < 40%
+- no failed checks
+- low behavior similarity
+- clear economic mechanism
 
 ### medium
 
-Use for refinement:
+Use for strong but less exceptional submission candidates:
 
-- No failed checks and behavior similarity `< 0.7`
-- Meets or nearly meets platform floor, or has Sharpe `>= 0.8`, Fitness `>= 0.5`, Turnover `0.5%..80%`
-- Defect is plausibly fixable by window, decay, neutralization, truncation, or wrapper changes
+- passes submission gates
+- Sharpe >= 1.58, Fitness >= 1.0, Turnover <= 70%
 
 ### low
 
-Reject or archive:
+Use for minimum-pass submission candidates:
 
-- Failed checks, behavior similarity `>= 0.7`, nonsensical economics, extreme turnover, weak Sharpe/Fitness, or unstable stage metrics
-- Do not add low quality families to `config/templates.json`
+- passes submission gates
+- does not meet medium/high standards
+- still save to `submittable_alphas`

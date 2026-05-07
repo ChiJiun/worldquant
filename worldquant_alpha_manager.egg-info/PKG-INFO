@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: worldquant-alpha-manager
-Version: 0.1.0
-Summary: WorldQuant Brain alpha mining and management automation system
-Requires-Python: >=3.8
-Requires-Dist: numpy>=1.24
-Requires-Dist: pandas>=2.0
-Requires-Dist: requests>=2.31

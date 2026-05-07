@@ -24,7 +24,30 @@ class ResultScorer:
         )
 
     def classify_quality(self, metrics: SimulationMetrics) -> str:
-        """Bucket completed simulations for review and template promotion."""
+        """Bucket only submission-passing alphas into high/medium/low tiers."""
+        if not self.passes_submission_requirements(metrics):
+            return "not_submittable"
+        extras = metrics.extras or {}
+        behavior_similarity = float(extras.get("behavior_similarity", 0.0) or 0.0)
+        if (
+            metrics.sharpe >= 2.0
+            and metrics.fitness >= 1.3
+            and 0.01 <= metrics.turnover < 0.40
+            and behavior_similarity < 0.55
+        ):
+            return "high"
+        if metrics.sharpe >= 1.58 and metrics.fitness >= 1.0 and 0.01 <= metrics.turnover <= 0.70:
+            return "medium"
+        return "low"
+
+    def triage_decision(self, metrics: SimulationMetrics) -> str:
+        if self.passes_submission_requirements(metrics):
+            return "submit_ready"
+        if self.is_refinement_candidate(metrics):
+            return "refine_candidate"
+        return "reject"
+
+    def passes_submission_requirements(self, metrics: SimulationMetrics) -> bool:
         extras = metrics.extras or {}
         checks_failed = int(extras.get("checks_failed", 0) or 0)
         behavior_similarity = float(extras.get("behavior_similarity", 0.0) or 0.0)
@@ -33,7 +56,7 @@ class ResultScorer:
         delay = int(extras.get("delay", 1) or 1)
 
         if checks_failed > 0 or behavior_similarity >= 0.7:
-            return "low"
+            return False
 
         if region == "CHN":
             sharpe_floor = 2.6 if delay == 0 else 1.625
@@ -43,25 +66,24 @@ class ResultScorer:
             returns_floor = 0.0
         fitness_floor = 1.3 if delay == 0 else 1.0
 
-        passes_submission_floor = (
+        return (
             metrics.sharpe >= sharpe_floor
             and metrics.fitness >= fitness_floor
             and 0.01 <= turnover <= 0.70
             and abs(metrics.returns) >= returns_floor
         )
-        if not passes_submission_floor:
-            if metrics.sharpe >= 0.8 and metrics.fitness >= 0.5 and 0.005 <= turnover <= 0.80:
-                return "medium"
-            return "low"
 
-        if (
-            metrics.sharpe >= max(sharpe_floor * 1.25, 1.58)
-            and metrics.fitness >= max(fitness_floor * 1.3, 1.3)
-            and 0.01 <= turnover <= 0.40
-            and behavior_similarity < 0.55
-        ):
-            return "high"
-        return "medium"
+    def is_refinement_candidate(self, metrics: SimulationMetrics) -> bool:
+        extras = metrics.extras or {}
+        checks_failed = int(extras.get("checks_failed", 0) or 0)
+        behavior_similarity = float(extras.get("behavior_similarity", 0.0) or 0.0)
+        return (
+            checks_failed == 0
+            and behavior_similarity < 0.7
+            and metrics.sharpe >= 0.8
+            and metrics.fitness >= 0.5
+            and 0.005 <= metrics.turnover <= 0.80
+        )
 
     def _check_penalty(self, metrics: SimulationMetrics) -> float:
         checks = metrics.extras.get("checks", [])

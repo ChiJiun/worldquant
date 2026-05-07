@@ -60,6 +60,7 @@ def test_passed_alpha_csv_records_full_metrics(settings):
             "region": "USA",
             "delay": 1,
             "neutralization": "INDUSTRY",
+            "triage_decision": "submit_ready",
             "quality_tier": "high",
             "checks_failed": 0,
         },
@@ -73,5 +74,36 @@ def test_passed_alpha_csv_records_full_metrics(settings):
 
     passed = settings.output_dir / "passed_alphas.csv"
     header = passed.read_text(encoding="utf-8").splitlines()[0].split(",")
-    for column in ["alpha_id", "grade", "status", "region", "delay", "neutralization", "quality_tier", "sharpe", "fitness", "turnover", "margin", "reward"]:
+    for column in ["alpha_id", "grade", "status", "region", "delay", "neutralization", "triage_decision", "quality_tier", "sharpe", "fitness", "turnover", "margin", "reward"]:
         assert column in header
+
+
+def test_workflow_records_template_candidates(settings):
+    settings.ensure_directories()
+    hypotheses = settings.output_dir / "alpha_hypotheses.json"
+    hypotheses.write_text(
+        json.dumps(
+            {
+                "session_id": "test_session",
+                "hypotheses": [
+                    {
+                        "id": "test_hypothesis",
+                        "family": "test_family",
+                        "rationale": "A testable economic mechanism.",
+                        "alphas": [{"expression": "rank(close)"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runner = AlphaDiscoveryWorkflow(settings)
+    try:
+        runner.run(hypotheses, promote=True)
+        templates = runner.storage.list_alpha_templates()
+    finally:
+        runner.close()
+
+    assert templates
+    assert templates[0]["family"] == "test_family"

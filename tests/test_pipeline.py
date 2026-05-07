@@ -42,11 +42,10 @@ def test_pipeline_run_search_persists_best_alpha(settings):
 
     assert len(records) == settings.batch_size
     assert (settings.output_dir / "run_summary.csv").exists()
-    assert (settings.output_dir / "passed_alphas.csv").exists()
     reopened = StorageRepository(settings.storage_path, settings.output_dir)
     try:
-        best_rows = reopened.list_best()
-        assert len(best_rows) >= 1
+        completed = reopened.list_completed_behavior_profiles()
+        assert len(completed) >= 1
     finally:
         reopened.close()
 

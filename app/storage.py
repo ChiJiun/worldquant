@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 import csv
 import json
 import sqlite3
@@ -80,6 +80,42 @@ class StorageRepository:
                 avg_reward REAL NOT NULL DEFAULT 0,
                 checkpoint_json TEXT NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE IF NOT EXISTS research_hypotheses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                hypothesis_id TEXT NOT NULL,
+                family TEXT NOT NULL,
+                source_urls_json TEXT NOT NULL DEFAULT '[]',
+                economic_mechanism TEXT,
+                rationale TEXT,
+                expected_horizon TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS alpha_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                family TEXT NOT NULL,
+                hypothesis_id TEXT,
+                seed_expression TEXT NOT NULL,
+                rationale TEXT,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'candidate',
+                triage_decision TEXT,
+                quality_tier TEXT,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS submittable_alphas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alpha_id TEXT,
+                expression TEXT NOT NULL,
+                family TEXT NOT NULL,
+                source TEXT NOT NULL,
+                quality_tier TEXT NOT NULL,
+                metrics_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
         self.connection.commit()
@@ -146,6 +182,133 @@ class StorageRepository:
             (alpha_id, 1 if is_best else 0, record.error or ""),
         )
         self.connection.commit()
+
+    def save_research_hypothesis(self, session_id: str, payload: dict) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO research_hypotheses
+            (session_id, hypothesis_id, family, source_urls_json, economic_mechanism, rationale, expected_horizon, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                str(payload.get("id") or payload.get("name") or ""),
+                str(payload.get("family") or payload.get("id") or payload.get("name") or ""),
+                json.dumps(payload.get("source_urls", []), sort_keys=True),
+                payload.get("economic_mechanism", ""),
+                payload.get("rationale", ""),
+                payload.get("expected_horizon", ""),
+                "active",
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        self.connection.commit()
+
+    def save_alpha_template(
+        self,
+        *,
+        family: str,
+        hypothesis_id: str,
+        seed_expression: str,
+        rationale: str,
+        source: str,
+        status: str,
+        triage_decision: str = "",
+        quality_tier: str = "",
+        metrics: Optional[dict] = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.connection.execute(
+            """
+            INSERT INTO alpha_templates
+            (family, hypothesis_id, seed_expression, rationale, source, status, triage_decision, quality_tier, metrics_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                family,
+                hypothesis_id,
+                seed_expression,
+                rationale,
+                source,
+                status,
+                triage_decision,
+                quality_tier,
+                json.dumps(metrics or {}, sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        self.connection.commit()
+
+    def mark_template_family_completed(self, family: str) -> None:
+        self.connection.execute(
+            "UPDATE alpha_templates SET status = ?, updated_at = ? WHERE family = ? AND status != ?",
+            ("ga_completed", datetime.now(timezone.utc).isoformat(), family, "rejected"),
+        )
+        self.connection.commit()
+
+    def save_submittable_alpha(self, candidate: AlphaCandidate, metrics: SimulationMetrics, source: str) -> None:
+        extras = metrics.extras or {}
+        payload = self._metrics_payload(metrics)
+        self.connection.execute(
+            """
+            INSERT INTO submittable_alphas
+            (alpha_id, expression, family, source, quality_tier, metrics_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(extras.get("alpha_id", "")),
+                candidate.expression,
+                candidate.template_type,
+                source,
+                str(extras.get("quality_tier", "low")),
+                json.dumps(payload, sort_keys=True),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        self.connection.commit()
+
+    def list_alpha_templates(self) -> List[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT family, hypothesis_id, seed_expression, source, status, triage_decision, quality_tier, updated_at
+            FROM alpha_templates
+            ORDER BY updated_at DESC, id DESC
+            """
+        ).fetchall()
+
+    def list_submittable_alphas(self) -> List[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT expression, family, source, quality_tier, metrics_json, created_at
+            FROM submittable_alphas
+            ORDER BY id DESC
+            """
+        ).fetchall()
+
+    def _metrics_payload(self, metrics: SimulationMetrics) -> dict[str, Any]:
+        extras = metrics.extras or {}
+        return {
+            "alpha_id": extras.get("alpha_id", ""),
+            "grade": extras.get("grade", ""),
+            "status": extras.get("status", ""),
+            "stage": extras.get("stage", ""),
+            "region": extras.get("region", ""),
+            "universe": extras.get("universe", ""),
+            "delay": extras.get("delay", ""),
+            "neutralization": extras.get("neutralization", ""),
+            "checks_failed": extras.get("checks_failed", 0),
+            "failed_check_names": extras.get("failed_check_names", []),
+            "behavior_similarity": extras.get("behavior_similarity", 0.0),
+            "triage_decision": extras.get("triage_decision", ""),
+            "quality_tier": extras.get("quality_tier", ""),
+            "sharpe": metrics.sharpe,
+            "fitness": metrics.fitness,
+            "returns": metrics.returns,
+            "drawdown": metrics.drawdown,
+            "turnover": metrics.turnover,
+            "margin": metrics.margin,
+        }
 
     def iter_fingerprints(self) -> Iterable[Tuple[str, str, str]]:
         rows = self.connection.execute("SELECT fingerprint, normalized_expression, template_type FROM alphas").fetchall()
@@ -530,6 +693,7 @@ class StorageRepository:
             "checks_failed",
             "failed_check_names",
             "behavior_similarity",
+            "triage_decision",
             "quality_tier",
             "sharpe",
             "fitness",
@@ -561,6 +725,7 @@ class StorageRepository:
                     extras.get("checks_failed", 0),
                     ";".join(str(item) for item in extras.get("failed_check_names", [])),
                     extras.get("behavior_similarity", 0.0),
+                    extras.get("triage_decision", ""),
                     extras.get("quality_tier", ""),
                     metrics.sharpe,
                     metrics.fitness,
@@ -602,6 +767,7 @@ class StorageRepository:
                         "universe",
                         "checks_failed",
                         "behavior_similarity",
+                        "triage_decision",
                         "quality_tier",
                         "sharpe",
                         "fitness",
@@ -622,6 +788,7 @@ class StorageRepository:
                     extras.get("universe", ""),
                     extras.get("checks_failed", 0),
                     extras.get("behavior_similarity", 0.0),
+                    extras.get("triage_decision", ""),
                     extras.get("quality_tier", ""),
                     record.metrics.sharpe,
                     record.metrics.fitness,

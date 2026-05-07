@@ -241,19 +241,18 @@ class AlphaPipeline:
             behavior_decision = self.dedupe.behavior_similarity(candidate, metrics)
             metrics.extras["behavior_similarity"] = behavior_decision.similarity
             metrics.extras["behavior_overlap_reason"] = behavior_decision.reason
+            metrics.extras["triage_decision"] = self.scorer.triage_decision(metrics)
             metrics.extras["quality_tier"] = self.scorer.classify_quality(metrics)
             reward = self.scorer.score(metrics, duplicate_like=behavior_decision.should_skip)
             completed_at = datetime.now(timezone.utc)
-            is_best = (
-                metrics.sharpe > self.settings.sharpe_threshold
-                and metrics.fitness > self.settings.fitness_threshold
-                and not behavior_decision.should_skip
-            )
+            is_best = metrics.extras["triage_decision"] == "submit_ready" and not behavior_decision.should_skip
             self.storage.mark_status(alpha_id, "complete")
             record = SimulationRecord(candidate=candidate, handle=handle, metrics=metrics, reward=reward, api_status=status, completed_at=completed_at)
             self.storage.save_result(alpha_id, record, is_best=is_best)
             self.storage.append_run_summary(record)
             if is_best:
+                self.storage.save_submittable_alpha(candidate, metrics, source="ga")
+                self.storage.mark_template_family_completed(candidate.template_type)
                 self.storage.append_best_alpha(candidate, metrics, reward)
             self.dedupe.register_behavior(candidate, metrics)
             EVENT_LOGGER.info("completed alpha_id=%s status=%s sharpe=%.4f fitness=%.4f", alpha_id, status, metrics.sharpe, metrics.fitness)

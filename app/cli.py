@@ -63,6 +63,13 @@ def make_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("review", help="Print best alphas from storage")
     subparsers.add_parser("export-best", help="Export best alphas to stdout")
+    subparsers.add_parser("template-list", help="Print manually reviewable alpha template families from storage")
+    subparsers.add_parser("submittable-list", help="Print alphas that passed submission gates from storage")
+    template_add = subparsers.add_parser("template-add", help="Manually add a seed expression to the template DB")
+    template_add.add_argument("--family", required=True)
+    template_add.add_argument("--expression", required=True)
+    template_add.add_argument("--rationale", default="")
+    template_add.add_argument("--hypothesis-id", default="manual")
     subparsers.add_parser("retry", help="Retry failed candidates")
     subparsers.add_parser("login-check", help="Check WorldQuant Brain login only")
     session_report = subparsers.add_parser("session-report", help="Show recent mining sessions")
@@ -114,6 +121,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
         if args.command in {"review", "export-best"}:
             render_rows(pipeline.storage.list_best())
+            return 0
+        if args.command == "template-list":
+            render_rows(pipeline.storage.list_alpha_templates())
+            return 0
+        if args.command == "submittable-list":
+            render_rows(pipeline.storage.list_submittable_alphas())
+            return 0
+        if args.command == "template-add":
+            pipeline.storage.save_alpha_template(
+                family=args.family,
+                hypothesis_id=args.hypothesis_id,
+                seed_expression=args.expression,
+                rationale=args.rationale,
+                source="manual",
+                status="candidate",
+            )
             return 0
         if args.command == "session-report":
             render_rows(pipeline.storage.list_recent_sessions(args.limit))

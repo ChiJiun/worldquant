@@ -9,6 +9,7 @@ Use these files for this workspace:
 - `app/pipeline/runner.py`: end-to-end candidate processing, quality gate, simulation, scoring, storage.
 - `app/scoring.py`: reward and high/medium/low quality classifier.
 - `app/storage.py`: SQLite persistence, CSV outputs, best alpha export, dashboard.
+- SQLite tables: `research_hypotheses`, `alpha_templates`, `submittable_alphas`, plus existing alpha/simulation/metric tables.
 - `app/quality.py`: pre-simulation expression filters.
 - `config/fields.json`: available fields, wrappers, groups, and decays.
 - `config/templates.json`: vetted GA template families. This may be `{}` until good families are promoted.

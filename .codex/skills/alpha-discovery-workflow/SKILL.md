@@ -5,7 +5,7 @@ description: Automate WorldQuant BRAIN alpha discovery from market-arbitrage hyp
 
 # Alpha Discovery Workflow
 
-Use this skill as the operating procedure for this repo's alpha mining loop. Keep the roles separated even when one Codex instance executes both passes.
+Use this skill as the operating procedure for this repo's alpha mining loop. Keep the professional research role, simulation triage role, and GA/template governance role separate even when one Codex instance executes all passes.
 
 ## Repo Map
 
@@ -36,7 +36,7 @@ C:\Users\USER\anaconda3\python.exe -m app dashboard --limit 10
 
 ### Hypothesis Scout
 
-Goal: find economically plausible market-arbitrage hypotheses, not random formulas.
+Goal: act as a professional quantitative researcher: read papers, research notes, and market-structure evidence, then design economically plausible market-arbitrage hypotheses and alpha expressions.
 
 Procedure:
 
@@ -51,17 +51,17 @@ Do not promote a hypothesis to GA templates before at least one direct simulatio
 
 ### Alpha Judge
 
-Goal: decide whether simulated results justify refinement, family promotion, or rejection.
+Goal: decide whether simulated results are submit-ready, improvement candidates, or rejects.
 
 Procedure:
 
 1. Simulate the scout's candidates with the repo's Brain client or mock client when credentials/network are unavailable.
 2. Inspect `sharpe`, `fitness`, `returns`, `drawdown`, `turnover`, `margin`, `checks_failed`, stage metrics, and behavior similarity.
-3. Assign `quality_tier` using `references/quality-rubric.md`.
+3. Assign `triage_decision` and `quality_tier` using `references/quality-rubric.md`.
 4. Decide:
-   - `reject`: low quality, failed checks, no economic mechanism, or duplicate behavior.
-   - `refine`: medium quality or near-threshold result with a fixable defect.
-   - `promote_family`: high quality, clear mechanism, low similarity, and stable checks.
+   - `submit_ready`: already passes WorldQuant submission gates.
+   - `refine_candidate`: not submit-ready, but close enough and economically coherent enough to improve.
+   - `reject`: failed checks, weak economics, duplicate behavior, or too far from submission.
 5. For `refine`, change one mechanism-preserving dimension at a time: window, decay, neutralization, truncation, rank/zscore wrapper, or one field substitution from the same dataset.
 6. Run `python -m app alpha-workflow --hypotheses outputs/alpha_hypotheses.json --promote` for the deterministic simulate/judge/report pass.
 
@@ -69,15 +69,26 @@ If the user explicitly requests parallel agents, delegate Hypothesis Scout and A
 
 ## Template Promotion
 
-`config/templates.json` is intentionally allowed to be empty. Only add a template family after direct simulation evidence supports it.
+`config/templates.json` is intentionally allowed to be empty. Template governance primarily lives in SQLite so users can manually add seed expressions and review families.
 
-Promotion checklist:
+Rules:
 
-- At least one expression in the family is high quality, or multiple related expressions are medium quality with consistent economic interpretation.
+- Put `submit_ready` and `refine_candidate` expressions into the `alpha_templates` DB table.
+- Put GA or research expressions that pass submission gates into `submittable_alphas`.
+- Mark a family `ga_completed` after GA produces a submit-ready alpha from that family.
+- Use `quality_tier` only for alphas that already pass submission gates: `high`, `medium`, or `low`.
 - The family can be parameterized by fields/windows/wrappers without becoming a loose linear combination bucket.
 - The template name describes the mechanism, not a metric target.
 - The allowed fields are in the same economic family or dataset.
 - The family has an obvious mutation surface for GA: windows, wrappers, decay, neutralization-compatible fields.
+
+Manual template DB commands:
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app template-add --family <name> --expression "<FASTEXPR>" --rationale "<why>"
+C:\Users\USER\anaconda3\python.exe -m app template-list
+C:\Users\USER\anaconda3\python.exe -m app submittable-list
+```
 
 After adding or editing templates, run:
 
