@@ -504,39 +504,62 @@ class StorageRepository:
             if payload["count"]
         ]
 
-    def append_best_alpha(self, candidate: AlphaCandidate, metrics: SimulationMetrics) -> None:
+    def append_best_alpha(self, candidate: AlphaCandidate, metrics: SimulationMetrics, reward: Optional[object] = None) -> None:
         with (self.output_dir / "best_alphas.txt").open("a", encoding="utf-8") as handle:
-            handle.write(f"{candidate.expression} | sharpe={metrics.sharpe:.4f} | fitness={metrics.fitness:.4f} | returns={metrics.returns:.4f} | drawdown={metrics.drawdown:.4f}\n")
+            extras = metrics.extras or {}
+            reward_value = getattr(reward, "value", "")
+            handle.write(
+                f"{candidate.expression} | quality={extras.get('quality_tier', '')} | "
+                f"alpha_id={extras.get('alpha_id', '')} | sharpe={metrics.sharpe:.4f} | "
+                f"fitness={metrics.fitness:.4f} | returns={metrics.returns:.4f} | "
+                f"drawdown={metrics.drawdown:.4f} | turnover={metrics.turnover:.4f} | "
+                f"margin={metrics.margin:.4f} | reward={reward_value}\n"
+            )
         path = self.output_dir / "passed_alphas.csv"
+        columns = [
+            "expression",
+            "template_type",
+            "alpha_id",
+            "grade",
+            "status",
+            "stage",
+            "region",
+            "universe",
+            "delay",
+            "neutralization",
+            "checks_failed",
+            "failed_check_names",
+            "behavior_similarity",
+            "quality_tier",
+            "sharpe",
+            "fitness",
+            "returns",
+            "drawdown",
+            "turnover",
+            "margin",
+            "reward",
+        ]
+        self._rotate_csv_if_header_changed(path, columns)
         write_header = not path.exists()
         with path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             if write_header:
-                writer.writerow(
-                    [
-                        "expression",
-                        "template_type",
-                        "stage",
-                        "universe",
-                        "checks_failed",
-                        "behavior_similarity",
-                        "quality_tier",
-                        "sharpe",
-                        "fitness",
-                        "returns",
-                        "drawdown",
-                        "turnover",
-                        "margin",
-                    ]
-                )
+                writer.writerow(columns)
             extras = metrics.extras or {}
             writer.writerow(
                 [
                     candidate.expression,
                     candidate.template_type,
+                    extras.get("alpha_id", ""),
+                    extras.get("grade", ""),
+                    extras.get("status", ""),
                     extras.get("stage", ""),
+                    extras.get("region", ""),
                     extras.get("universe", ""),
+                    extras.get("delay", ""),
+                    extras.get("neutralization", ""),
                     extras.get("checks_failed", 0),
+                    ";".join(str(item) for item in extras.get("failed_check_names", [])),
                     extras.get("behavior_similarity", 0.0),
                     extras.get("quality_tier", ""),
                     metrics.sharpe,
@@ -545,8 +568,24 @@ class StorageRepository:
                     metrics.drawdown,
                     metrics.turnover,
                     metrics.margin,
+                    getattr(reward, "value", ""),
                 ]
             )
+
+    def _rotate_csv_if_header_changed(self, path: Path, expected_columns: List[str]) -> None:
+        if not path.exists() or path.stat().st_size == 0:
+            return
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            current = next(reader, [])
+        if current == expected_columns:
+            return
+        legacy_path = path.with_name(path.stem + "_legacy" + path.suffix)
+        counter = 1
+        while legacy_path.exists():
+            legacy_path = path.with_name(f"{path.stem}_legacy_{counter}{path.suffix}")
+            counter += 1
+        path.replace(legacy_path)
 
     def append_run_summary(self, record: SimulationRecord) -> None:
         path = self.output_dir / "run_summary.csv"

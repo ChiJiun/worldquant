@@ -69,9 +69,10 @@ def make_parser() -> argparse.ArgumentParser:
     session_report.add_argument("--limit", type=int, default=10)
     dashboard = subparsers.add_parser("dashboard", help="Write a markdown session dashboard")
     dashboard.add_argument("--limit", type=int, default=10)
-    workflow = subparsers.add_parser("workflow", help="Run agent-discovered hypotheses through simulate, quality tiering, and reporting")
-    workflow.add_argument("--hypotheses", required=True, help="Path to JSON produced by the hypothesis scout")
-    workflow.add_argument("--promote", action="store_true", help="Write high-tier families to outputs/promotable_families.json")
+    for command_name in ("workflow", "alpha-workflow"):
+        workflow = subparsers.add_parser(command_name, help="Run agent-discovered hypotheses through simulate, quality tiering, and reporting")
+        workflow.add_argument("--hypotheses", required=True, help="Path to JSON produced by the hypothesis scout")
+        workflow.add_argument("--promote", action="store_true", help="Write high-tier families to outputs/promotable_families.json")
     return parser
 
 
@@ -84,6 +85,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     settings = Settings.load(Path.cwd())
+    if args.command in {"workflow", "alpha-workflow"}:
+        runner = AlphaDiscoveryWorkflow(settings)
+        try:
+            path = runner.run(Path(args.hypotheses), promote=args.promote)
+            print(path)
+        finally:
+            runner.close()
+        return 0
     pipeline = build_pipeline(settings, getattr(args, "engine", "ga"))
     try:
         if args.command == "generate":
@@ -112,15 +121,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.command == "dashboard":
             path = pipeline.storage.generate_session_dashboard(args.limit)
             print(path)
-            return 0
-        if args.command == "workflow":
-            pipeline.storage.close()
-            runner = AlphaDiscoveryWorkflow(settings)
-            try:
-                path = runner.run(Path(args.hypotheses), promote=args.promote)
-                print(path)
-            finally:
-                runner.close()
             return 0
         if args.command == "login-check":
             pipeline.client.login()

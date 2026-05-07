@@ -98,7 +98,7 @@ class AlphaDiscoveryWorkflow:
             self.storage.save_result(alpha_id, record, is_best=is_best)
             self.storage.append_run_summary(record)
             if is_best:
-                self.storage.append_best_alpha(candidate, metrics)
+                self.storage.append_best_alpha(candidate, metrics, reward)
             return record
         except Exception as exc:
             self.storage.mark_status(alpha_id, "failed")

@@ -254,7 +254,7 @@ class AlphaPipeline:
             self.storage.save_result(alpha_id, record, is_best=is_best)
             self.storage.append_run_summary(record)
             if is_best:
-                self.storage.append_best_alpha(candidate, metrics)
+                self.storage.append_best_alpha(candidate, metrics, reward)
             self.dedupe.register_behavior(candidate, metrics)
             EVENT_LOGGER.info("completed alpha_id=%s status=%s sharpe=%.4f fitness=%.4f", alpha_id, status, metrics.sharpe, metrics.fitness)
             LOGGER.info(

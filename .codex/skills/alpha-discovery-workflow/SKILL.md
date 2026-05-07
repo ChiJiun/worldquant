@@ -11,8 +11,18 @@ Use this skill as the operating procedure for this repo's alpha mining loop. Kee
 
 Read `references/repo-map.md` before changing code or running commands.
 Read `references/quality-rubric.md` before judging simulated alphas or changing thresholds.
+Use `knowledge-base-search-skill` when local WorldQuant field/operator/optimization knowledge is needed.
+Use `factor-backtest-skill` when batching exactly 8 expressions through a multi-simulation flow.
 
-Key local commands:
+Primary tool command:
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\alpha_hypotheses.json --promote
+```
+
+The hypothesis scout must write JSON in the schema shown in `references/hypotheses-schema.md` before running the tool.
+
+Other local commands:
 
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m app login-check
@@ -35,6 +45,7 @@ Procedure:
 3. Map the mechanism to available WorldQuant fields from `config/fields.json`.
 4. Draft 3-8 FASTEXPR candidates from the same mechanism. Keep the field set small and economically coherent.
 5. Record why each candidate should work, expected horizon, likely failure mode, and suggested neutralization.
+6. Write the final candidate batch to `outputs/alpha_hypotheses.json`.
 
 Do not promote a hypothesis to GA templates before at least one direct simulation shows promise.
 
@@ -52,6 +63,7 @@ Procedure:
    - `refine`: medium quality or near-threshold result with a fixable defect.
    - `promote_family`: high quality, clear mechanism, low similarity, and stable checks.
 5. For `refine`, change one mechanism-preserving dimension at a time: window, decay, neutralization, truncation, rank/zscore wrapper, or one field substitution from the same dataset.
+6. Run `python -m app alpha-workflow --hypotheses outputs/alpha_hypotheses.json --promote` for the deterministic simulate/judge/report pass.
 
 If the user explicitly requests parallel agents, delegate Hypothesis Scout and Alpha Judge as separate agents. Otherwise run the two passes locally and keep their outputs separate.
 
