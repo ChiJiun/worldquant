@@ -1,0 +1,9 @@
+{
+  "price_fields": ["close", "open", "high", "low", "vwap", "returns"],
+  "volume_fields": ["volume", "adv20", "adv60"],
+  "fundamental_fields": ["eps", "operating_margin", "sales", "book_value", "cashflow"],
+  "group_fields": ["sector", "industry", "subindustry"],
+  "windows": [5, 10, 20, 40, 60, 120],
+  "decays": [3, 5, 10],
+  "wrappers": ["rank", "zscore", "ts_rank", "ts_decay_linear"]
+}

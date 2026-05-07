@@ -1,0 +1,537 @@
+2026-03-19 23:47:21,284 | INFO | events | generated alpha_id=1 template=price_volume_divergence
+2026-03-19 23:47:21,294 | INFO | events | generated alpha_id=2 template=mean_reversion
+2026-03-19 23:47:26,957 | INFO | events | completed alpha_id=5 status=complete sharpe=1.6600 fitness=1.2000
+2026-03-19 23:47:29,962 | INFO | events | completed alpha_id=6 status=complete sharpe=1.6600 fitness=0.8000
+2026-03-19 23:47:32,961 | INFO | events | completed alpha_id=7 status=complete sharpe=0.7000 fitness=1.5000
+2026-03-19 23:53:59,570 | INFO | events | generated alpha_id=1 template=price_volume_divergence
+2026-03-19 23:53:59,579 | INFO | events | generated alpha_id=2 template=mean_reversion
+2026-03-19 23:53:59,589 | INFO | events | generated alpha_id=5 template=mean_reversion
+2026-03-19 23:53:59,599 | INFO | events | generated alpha_id=6 template=momentum
+2026-03-19 23:53:59,608 | INFO | events | generated alpha_id=7 template=momentum
+2026-03-19 23:54:27,884 | INFO | events | generated alpha_id=1 template=price_volume_divergence
+2026-03-19 23:54:27,893 | INFO | events | generated alpha_id=2 template=mean_reversion
+2026-03-19 23:54:27,901 | INFO | events | generated alpha_id=5 template=mean_reversion
+2026-03-20 00:26:46,766 | INFO | events | generated alpha_id=1 template=price_volume_divergence
+2026-03-20 01:18:44,561 | INFO | events | completed alpha_id=47 status=complete sharpe=1.5400 fitness=0.8000
+2026-03-20 01:18:47,558 | INFO | events | completed alpha_id=49 status=complete sharpe=0.7000 fitness=0.5000
+2026-03-20 01:18:50,564 | INFO | events | completed alpha_id=50 status=complete sharpe=1.1800 fitness=0.7000
+2026-03-20 01:18:53,573 | INFO | events | completed alpha_id=51 status=complete sharpe=0.9400 fitness=0.5000
+2026-03-20 01:18:56,561 | INFO | events | completed alpha_id=56 status=complete sharpe=1.1800 fitness=0.7000
+2026-03-20 01:18:59,561 | INFO | events | completed alpha_id=60 status=complete sharpe=1.3000 fitness=0.6000
+2026-03-20 01:19:02,560 | INFO | events | completed alpha_id=61 status=complete sharpe=0.7000 fitness=0.5000
+2026-03-20 01:41:30,138 | INFO | events | submitting template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 5)), subindustry))
+2026-03-20 01:44:16,775 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + book_value)), 120) - ts_rank(book_value, 120)))
+2026-03-20 01:44:24,338 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(close, 60) - ts_decay_linear(ts_delta(adv20, 60), 3)), 60)
+2026-03-20 01:44:59,894 | INFO | events | preparing template=momentum expression=rank((ts_rank(close, 120) - ts_rank(close, 120)))
+2026-03-20 01:46:41,778 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 60)) / (1 + (ts_max(close, 60) - ts_min(close, 60)))))
+2026-03-20 01:46:43,447 | INFO | events | preparing template=breakout expression=rank(((high - ts_min(high, 20)) / (1 + (ts_max(high, 20) - ts_min(high, 20)))))
+2026-03-20 01:46:45,440 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(eps, 20) - ts_rank(sales, 20)))
+2026-03-20 01:48:28,856 | INFO | events | completed alpha_id=24 status=complete sharpe=0.7100 fitness=0.3200
+2026-03-20 01:48:28,865 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 5)), sector))
+2026-03-20 01:49:22,796 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 5)), industry))
+2026-03-20 01:51:20,406 | INFO | events | completed alpha_id=27 status=complete sharpe=-0.5400 fitness=-0.1100
+2026-03-20 01:51:20,416 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 10)) / (1 + ts_std_dev(returns, 10))))
+2026-03-20 01:52:39,703 | INFO | events | completed alpha_id=28 status=complete sharpe=-1.0500 fitness=-0.2900
+2026-03-20 01:52:39,746 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(book_value, 20) - ts_rank(eps, 20)))
+2026-03-20 01:52:46,771 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 5)), sector))
+2026-03-20 01:54:11,678 | INFO | events | completed alpha_id=34 status=complete sharpe=0.5600 fitness=0.1800
+2026-03-20 01:54:11,691 | INFO | events | preparing template=volatility_reversion expression=rank(((vwap - ts_mean(vwap, 10)) / (1 + ts_std_dev(vwap, 10))))
+2026-03-20 01:56:45,418 | INFO | events | completed alpha_id=35 status=complete sharpe=-1.6200 fitness=-0.9200
+2026-03-20 01:56:45,645 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 5)), industry))
+2026-03-20 01:59:28,716 | INFO | events | completed alpha_id=40 status=complete sharpe=-0.4400 fitness=-0.0900
+2026-03-20 01:59:33,925 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 10)), sector))
+2026-03-20 02:02:02,810 | INFO | events | completed alpha_id=49 status=complete sharpe=0.1600 fitness=0.0300
+2026-03-20 02:02:02,996 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(close, 10) - ts_decay_linear(ts_delta(adv20, 10), 5)))
+2026-03-20 02:12:39,305 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(volume, 5), 3)))
+2026-03-20 02:23:19,634 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 5)), sector))
+2026-03-20 02:25:26,790 | INFO | events | completed alpha_id=60 status=complete sharpe=-0.9100 fitness=-0.3300
+2026-03-20 02:25:26,973 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 20)), industry))
+2026-03-20 02:27:51,670 | INFO | events | completed alpha_id=64 status=complete sharpe=-1.2200 fitness=-0.3800
+2026-03-20 02:27:51,690 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 5)), sector))
+2026-03-20 02:29:38,321 | INFO | events | completed alpha_id=65 status=complete sharpe=-0.0300 fitness=-0.0000
+2026-03-20 02:29:38,519 | INFO | events | preparing template=quality_value expression=rank((ts_rank((eps / (1 + book_value)), 120) - ts_rank(book_value, 120)))
+2026-03-20 02:29:45,369 | INFO | events | preparing template=breakout expression=ts_rank(((vwap - ts_min(vwap, 60)) / (1 + (ts_max(vwap, 60) - ts_min(vwap, 60)))), 60)
+2026-03-20 02:29:46,848 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((book_value - ts_mean(book_value, 5)), industry))
+2026-03-20 02:29:54,112 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(vwap, 5) - ts_rank(eps, 5)))
+2026-03-20 02:31:25,361 | INFO | events | completed alpha_id=84 status=complete sharpe=-1.6500 fitness=-0.6500
+2026-03-20 02:31:25,381 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 20) - ts_rank(operating_margin, 20)))
+2026-03-20 02:31:37,439 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 60)) / (1 + ts_std_dev(returns, 60))))
+2026-03-20 02:32:53,816 | INFO | events | completed alpha_id=89 status=complete sharpe=-1.0400 fitness=-0.3400
+2026-03-20 02:32:53,838 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + sales)), 60) - ts_rank(sales, 60)))
+2026-03-20 02:33:04,154 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 5)), sector))
+2026-03-20 02:34:45,488 | INFO | events | completed alpha_id=100 status=complete sharpe=-0.4400 fitness=-0.0900
+2026-03-20 02:34:50,658 | INFO | events | preparing template=quality_value expression=rank((ts_rank((operating_margin / (1 + sales)), 120) - ts_rank(sales, 120)))
+2026-03-20 02:34:51,943 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 20)), sector))
+2026-03-20 02:37:05,211 | INFO | events | completed alpha_id=105 status=complete sharpe=-1.2500 fitness=-0.3900
+2026-03-20 02:37:05,650 | INFO | events | preparing template=momentum expression=rank((ts_rank(returns, 60) - ts_rank(returns, 120)))
+2026-03-20 02:38:30,719 | INFO | events | completed alpha_id=114 status=complete sharpe=0.7500 fitness=0.1400
+2026-03-20 02:38:35,923 | INFO | events | preparing template=breakout expression=ts_rank(((high - ts_min(high, 60)) / (1 + (ts_max(high, 60) - ts_min(high, 60)))), 60)
+2026-03-20 02:38:37,224 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((operating_margin / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 02:38:39,369 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 5)) / (1 + ts_std_dev(returns, 5))))
+2026-03-20 02:41:46,613 | INFO | events | completed alpha_id=124 status=complete sharpe=-0.5700 fitness=-0.1200
+2026-03-20 02:41:46,862 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(returns, 5) - ts_decay_linear(ts_delta(volume, 5), 3)))
+2026-03-20 02:52:21,168 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((book_value / (1 + sales)), 60) - ts_rank(sales, 60)))
+2026-03-20 02:52:27,599 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((sales / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 02:54:29,458 | INFO | events | completed alpha_id=134 status=complete sharpe=-0.2700 fitness=-0.0600
+2026-03-20 02:54:29,486 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(cashflow, 20) - ts_rank(eps, 20)))
+2026-03-20 02:56:06,269 | INFO | events | completed alpha_id=135 status=complete sharpe=-0.3500 fitness=-0.0900
+2026-03-20 02:56:06,520 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 60)), sector))
+2026-03-20 02:58:44,004 | INFO | events | completed alpha_id=140 status=complete sharpe=-0.8000 fitness=-0.5600
+2026-03-20 02:58:49,440 | INFO | events | preparing template=quality_value expression=rank((ts_rank((operating_margin / (1 + eps)), 20) - ts_rank(eps, 20)))
+2026-03-20 02:58:50,715 | INFO | events | preparing template=volatility_reversion expression=zscore(((vwap - ts_mean(vwap, 10)) / (1 + ts_std_dev(vwap, 10))))
+2026-03-20 03:00:16,540 | INFO | events | completed alpha_id=150 status=complete sharpe=-1.5400 fitness=-0.8500
+2026-03-20 03:00:16,697 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 5)), industry))
+2026-03-20 03:02:23,740 | INFO | events | completed alpha_id=154 status=complete sharpe=-1.7900 fitness=-0.8400
+2026-03-20 03:02:23,993 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(vwap, 120) - ts_rank(eps, 120)))
+2026-03-20 03:04:36,249 | INFO | events | completed alpha_id=159 status=complete sharpe=-0.6200 fitness=-0.3400
+2026-03-20 03:04:41,538 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(close, 5) - ts_decay_linear(ts_delta(volume, 5), 3)))
+2026-03-20 03:15:17,335 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 20)) / (1 + ts_std_dev(returns, 20))))
+2026-03-20 03:16:31,889 | INFO | events | completed alpha_id=169 status=complete sharpe=-1.0100 fitness=-0.3200
+2026-03-20 03:16:32,106 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 10)), sector))
+2026-03-20 03:18:18,579 | INFO | events | completed alpha_id=174 status=complete sharpe=-1.0500 fitness=-0.3000
+2026-03-20 03:18:18,600 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(adv20, 5), 10)), 5)
+2026-03-20 03:29:05,242 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(vwap, 10) - ts_rank(vwap, 60)), 10)
+2026-03-20 03:30:28,262 | INFO | events | completed alpha_id=180 status=complete sharpe=-1.6100 fitness=-0.5900
+2026-03-20 03:30:28,463 | INFO | events | preparing template=quality_value expression=rank((ts_rank((returns / (1 + cashflow)), 20) - ts_rank(cashflow, 20)))
+2026-03-20 03:31:55,256 | INFO | events | completed alpha_id=184 status=complete sharpe=-1.1600 fitness=-0.1900
+2026-03-20 03:31:55,476 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 120) - ts_rank(cashflow, 120)))
+2026-03-20 03:33:59,477 | INFO | events | completed alpha_id=189 status=complete sharpe=0.5800 fitness=0.2200
+2026-03-20 03:34:04,763 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((returns - ts_mean(returns, 40)) / (1 + ts_std_dev(returns, 40))), 40)
+2026-03-20 03:35:35,048 | INFO | events | completed alpha_id=195 status=complete sharpe=-1.4400 fitness=-0.4100
+2026-03-20 03:35:35,213 | INFO | events | preparing template=volatility_reversion expression=rank(((close - ts_mean(close, 10)) / (1 + ts_std_dev(close, 10))))
+2026-03-20 03:37:11,821 | INFO | events | completed alpha_id=199 status=complete sharpe=-1.7100 fitness=-0.9500
+2026-03-20 03:37:12,093 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 60)), sector))
+2026-03-20 03:39:37,579 | INFO | events | completed alpha_id=205 status=complete sharpe=-1.2000 fitness=-0.3700
+2026-03-20 03:39:43,080 | INFO | events | preparing template=volatility_reversion expression=zscore(((close - ts_mean(close, 60)) / (1 + ts_std_dev(close, 60))))
+2026-03-20 03:41:58,502 | INFO | events | completed alpha_id=215 status=complete sharpe=-1.0700 fitness=-0.8100
+2026-03-20 03:41:58,663 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(vwap, 60) - ts_rank(eps, 60)))
+2026-03-20 03:43:27,922 | INFO | events | completed alpha_id=219 status=complete sharpe=-0.7900 fitness=-0.4100
+2026-03-20 03:43:27,953 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 120)) / (1 + (ts_max(close, 120) - ts_min(close, 120)))))
+2026-03-20 03:43:34,508 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 40)), subindustry))
+2026-03-20 03:44:57,329 | INFO | events | completed alpha_id=225 status=complete sharpe=-0.9300 fitness=-0.5300
+2026-03-20 03:44:57,531 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 10)), industry))
+2026-03-20 03:46:43,455 | INFO | events | completed alpha_id=229 status=complete sharpe=-1.0300 fitness=-0.2900
+2026-03-20 03:46:43,686 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((returns - ts_mean(returns, 20)) / (1 + ts_std_dev(returns, 20))), 20)
+2026-03-20 03:47:58,471 | INFO | events | completed alpha_id=234 status=complete sharpe=-1.4300 fitness=-0.4000
+2026-03-20 03:47:58,497 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 20)), subindustry))
+2026-03-20 03:49:29,197 | INFO | events | completed alpha_id=235 status=complete sharpe=-0.9900 fitness=-0.3000
+2026-03-20 03:49:40,111 | INFO | events | preparing template=breakout expression=rank(((low - ts_min(low, 20)) / (1 + (ts_max(low, 20) - ts_min(low, 20)))))
+2026-03-20 03:49:47,531 | INFO | events | preparing template=volatility_reversion expression=rank(((eps - ts_mean(eps, 10)) / (1 + ts_std_dev(eps, 10))))
+2026-03-20 03:51:49,668 | INFO | events | completed alpha_id=260 status=complete sharpe=-0.4200 fitness=-0.1100
+2026-03-20 03:51:49,832 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((cashflow / (1 + book_value)), 120) - ts_rank(book_value, 120)))
+2026-03-20 03:51:56,834 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(vwap, 60) - ts_decay_linear(ts_delta(volume, 60), 3)))
+2026-03-20 04:02:45,001 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 10)), sector))
+2026-03-20 04:04:14,756 | INFO | events | completed alpha_id=279 status=complete sharpe=-0.2000 fitness=-0.0300
+2026-03-20 04:04:19,969 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((close - ts_mean(close, 20)) / (1 + ts_std_dev(close, 20))), 20)
+2026-03-20 04:06:10,245 | INFO | events | completed alpha_id=284 status=complete sharpe=-1.5000 fitness=-0.7000
+2026-03-20 04:06:10,542 | INFO | events | preparing template=volatility_reversion expression=zscore(((eps - ts_mean(eps, 5)) / (1 + ts_std_dev(eps, 5))))
+2026-03-20 04:08:34,094 | INFO | events | completed alpha_id=290 status=complete sharpe=0.5300 fitness=0.1500
+2026-03-20 04:08:39,510 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + operating_margin)), 20) - ts_rank(operating_margin, 20)))
+2026-03-20 04:08:46,043 | INFO | events | preparing template=breakout expression=rank(((low - ts_min(low, 40)) / (1 + (ts_max(low, 40) - ts_min(low, 40)))))
+2026-03-20 04:08:48,240 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((operating_margin / (1 + sales)), 120) - ts_rank(sales, 120)))
+2026-03-20 04:08:55,498 | INFO | events | preparing template=breakout expression=rank(((vwap - ts_min(vwap, 20)) / (1 + (ts_max(vwap, 20) - ts_min(vwap, 20)))))
+2026-03-20 04:09:02,449 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 20)) / (1 + (ts_max(close, 20) - ts_min(close, 20)))))
+2026-03-20 04:09:09,010 | INFO | events | preparing template=breakout expression=ts_rank(((close - ts_min(close, 20)) / (1 + (ts_max(close, 20) - ts_min(close, 20)))), 20)
+2026-03-20 04:09:10,989 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 40)), sector))
+2026-03-20 04:10:45,415 | INFO | events | completed alpha_id=315 status=complete sharpe=-1.1800 fitness=-0.8000
+2026-03-20 04:10:45,642 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 10)), sector))
+2026-03-20 04:12:18,035 | INFO | events | completed alpha_id=320 status=complete sharpe=-0.8800 fitness=-0.2600
+2026-03-20 04:12:18,238 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 20)), sector))
+2026-03-20 04:14:46,319 | INFO | events | completed alpha_id=324 status=complete sharpe=-0.9500 fitness=-0.3000
+2026-03-20 04:14:46,341 | INFO | events | preparing template=quality_value expression=rank((ts_rank((returns / (1 + sales)), 10) - ts_rank(sales, 10)))
+2026-03-20 04:16:14,969 | INFO | events | completed alpha_id=325 status=complete sharpe=-1.4200 fitness=-0.3800
+2026-03-20 04:16:20,436 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 10)), industry))
+2026-03-20 04:17:51,397 | INFO | events | completed alpha_id=334 status=complete sharpe=-0.2800 fitness=-0.0500
+2026-03-20 04:17:51,646 | INFO | events | preparing template=quality_value expression=rank((ts_rank((high / (1 + cashflow)), 20) - ts_rank(cashflow, 20)))
+2026-03-20 04:19:22,264 | INFO | events | completed alpha_id=340 status=complete sharpe=-0.7700 fitness=-0.2000
+2026-03-20 04:19:27,504 | INFO | events | preparing template=volatility_reversion expression=zscore(((close - ts_mean(close, 20)) / (1 + ts_std_dev(close, 20))))
+2026-03-20 04:21:37,833 | INFO | events | completed alpha_id=345 status=complete sharpe=-1.3800 fitness=-0.8400
+2026-03-20 04:21:38,310 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((book_value - ts_mean(book_value, 20)) / (1 + ts_std_dev(book_value, 20))), 20)
+2026-03-20 04:21:49,374 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + operating_margin)), 20) - ts_rank(operating_margin, 20)))
+2026-03-20 04:21:55,940 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 60)) / (1 + ts_std_dev(returns, 60))))
+2026-03-20 04:23:11,438 | INFO | events | completed alpha_id=359 status=complete sharpe=-1.2000 fitness=-0.3700
+2026-03-20 04:23:11,669 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 5)) / (1 + ts_std_dev(returns, 5))))
+2026-03-20 04:24:31,731 | INFO | events | completed alpha_id=364 status=complete sharpe=-0.5000 fitness=-0.1100
+2026-03-20 04:24:31,981 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 120)), industry))
+2026-03-20 04:27:05,241 | INFO | events | completed alpha_id=369 status=complete sharpe=-1.2400 fitness=-0.3900
+2026-03-20 04:27:10,495 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(book_value, 120) - ts_rank(cashflow, 120)))
+2026-03-20 04:27:12,167 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 10)), sector))
+2026-03-20 04:29:48,466 | INFO | events | completed alpha_id=384 status=complete sharpe=-1.2700 fitness=-0.6800
+2026-03-20 04:29:48,500 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 20)) / (1 + ts_std_dev(returns, 20))))
+2026-03-20 04:32:05,471 | INFO | events | completed alpha_id=385 status=complete sharpe=-1.2500 fitness=-0.3900
+2026-03-20 04:32:10,692 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 20)), industry))
+2026-03-20 04:34:13,840 | INFO | events | completed alpha_id=390 status=complete sharpe=-1.3700 fitness=-0.9000
+2026-03-20 04:34:14,083 | INFO | events | preparing template=breakout expression=rank(((high - ts_min(high, 120)) / (1 + (ts_max(high, 120) - ts_min(high, 120)))))
+2026-03-20 04:34:20,788 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(adv20, 5), 5)))
+2026-03-20 04:45:05,441 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(cashflow, 120) - ts_rank(sales, 120)))
+2026-03-20 04:46:18,835 | INFO | events | completed alpha_id=405 status=complete sharpe=-0.0400 fitness=-0.0000
+2026-03-20 04:46:19,016 | INFO | events | preparing template=volatility_reversion expression=rank(((vwap - ts_mean(vwap, 5)) / (1 + ts_std_dev(vwap, 5))))
+2026-03-20 04:48:31,928 | INFO | events | completed alpha_id=410 status=complete sharpe=-1.8000 fitness=-0.8600
+2026-03-20 04:48:37,376 | INFO | events | preparing template=breakout expression=rank(((vwap - ts_min(vwap, 60)) / (1 + (ts_max(vwap, 60) - ts_min(vwap, 60)))))
+2026-03-20 04:48:39,080 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 20)), industry))
+2026-03-20 04:51:08,172 | INFO | events | completed alpha_id=429 status=complete sharpe=0.2900 fitness=0.0600
+2026-03-20 04:51:13,382 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(close, 10) - ts_decay_linear(ts_delta(volume, 10), 5)))
+2026-03-20 05:01:53,943 | INFO | events | preparing template=quality_value expression=rank((ts_rank((sales / (1 + book_value)), 20) - ts_rank(book_value, 20)))
+2026-03-20 05:01:55,231 | INFO | events | preparing template=volatility_reversion expression=zscore(((eps - ts_mean(eps, 40)) / (1 + ts_std_dev(eps, 40))))
+2026-03-20 05:03:36,903 | INFO | events | completed alpha_id=440 status=complete sharpe=0.3500 fitness=0.1200
+2026-03-20 05:03:37,095 | INFO | events | preparing template=quality_value expression=rank((ts_rank((cashflow / (1 + sales)), 120) - ts_rank(sales, 120)))
+2026-03-20 05:05:02,313 | INFO | events | completed alpha_id=444 status=complete sharpe=0.1200 fitness=0.0200
+2026-03-20 05:05:02,345 | INFO | events | preparing template=volatility_reversion expression=rank(((eps - ts_mean(eps, 20)) / (1 + ts_std_dev(eps, 20))))
+2026-03-20 05:06:27,999 | INFO | events | completed alpha_id=445 status=complete sharpe=0.2700 fitness=0.0600
+2026-03-20 05:06:33,472 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 5)), industry))
+2026-03-20 05:08:37,902 | INFO | events | completed alpha_id=454 status=complete sharpe=-1.9100 fitness=-0.8900
+2026-03-20 05:08:38,162 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + book_value)), 60) - ts_rank(book_value, 60)))
+2026-03-20 05:08:50,119 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(volume, 5), 10)))
+2026-03-20 05:19:50,174 | INFO | events | preparing template=momentum expression=rank((ts_rank(returns, 10) - ts_rank(returns, 60)))
+2026-03-20 05:21:45,368 | INFO | events | completed alpha_id=479 status=complete sharpe=0.5700 fitness=0.0900
+2026-03-20 05:21:45,597 | INFO | events | preparing template=volatility_reversion expression=rank(((eps - ts_mean(eps, 40)) / (1 + ts_std_dev(eps, 40))))
+2026-03-20 05:24:24,666 | INFO | events | completed alpha_id=484 status=complete sharpe=0.7000 fitness=0.2800
+2026-03-20 05:24:24,698 | INFO | events | preparing template=breakout expression=rank(((returns - ts_min(returns, 60)) / (1 + (ts_max(returns, 60) - ts_min(returns, 60)))))
+2026-03-20 05:24:26,129 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((returns - ts_mean(returns, 10)) / (1 + ts_std_dev(returns, 10))), 10)
+2026-03-20 05:25:47,287 | INFO | events | completed alpha_id=489 status=complete sharpe=-0.9400 fitness=-0.2100
+2026-03-20 05:25:58,260 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 60) - ts_rank(operating_margin, 60)))
+2026-03-20 05:25:59,554 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(operating_margin, 120) - ts_rank(eps, 120)))
+2026-03-20 05:26:01,762 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 10)) / (1 + ts_std_dev(returns, 10))))
+2026-03-20 05:27:20,945 | INFO | events | completed alpha_id=515 status=complete sharpe=-0.9500 fitness=-0.2900
+2026-03-20 05:27:26,450 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + operating_margin)), 120) - ts_rank(operating_margin, 120)))
+2026-03-20 05:27:27,895 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 10)), industry))
+2026-03-20 05:29:02,841 | INFO | events | completed alpha_id=529 status=complete sharpe=-1.3700 fitness=-0.7200
+2026-03-20 05:29:02,871 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 40)), industry))
+2026-03-20 05:30:18,745 | INFO | events | completed alpha_id=530 status=complete sharpe=-0.9800 fitness=-0.3200
+2026-03-20 05:30:18,958 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((returns / (1 + cashflow)), 5) - ts_rank(cashflow, 5)))
+2026-03-20 05:32:02,202 | INFO | events | completed alpha_id=534 status=complete sharpe=-0.4500 fitness=-0.0400
+2026-03-20 05:32:07,717 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 5)), industry))
+2026-03-20 05:33:39,383 | INFO | events | completed alpha_id=544 status=complete sharpe=-0.2100 fitness=-0.0300
+2026-03-20 05:33:44,904 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 20) - ts_rank(sales, 20)))
+2026-03-20 05:36:23,767 | INFO | events | completed alpha_id=555 status=complete sharpe=0.7100 fitness=0.3200
+2026-03-20 05:36:23,939 | INFO | events | preparing template=volatility_reversion expression=rank(((eps - ts_mean(eps, 5)) / (1 + ts_std_dev(eps, 5))))
+2026-03-20 05:37:40,978 | INFO | events | completed alpha_id=559 status=complete sharpe=-0.1800 fitness=-0.0300
+2026-03-20 05:37:41,234 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 5)), sector))
+2026-03-20 05:40:48,058 | INFO | events | completed alpha_id=565 status=complete sharpe=-1.7500 fitness=-0.8200
+2026-03-20 05:40:53,308 | INFO | events | preparing template=quality_value expression=rank((ts_rank((operating_margin / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 05:41:00,220 | INFO | events | preparing template=momentum expression=rank((ts_rank(vwap, 60) - ts_rank(vwap, 120)))
+2026-03-20 05:42:26,197 | INFO | events | completed alpha_id=584 status=complete sharpe=-0.7300 fitness=-0.3600
+2026-03-20 05:42:26,462 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(returns, 5) - ts_decay_linear(ts_delta(volume, 5), 10)))
+2026-03-20 05:53:14,959 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 10)), sector))
+2026-03-20 05:55:06,423 | INFO | events | completed alpha_id=595 status=complete sharpe=-1.6000 fitness=-0.8900
+2026-03-20 05:55:11,621 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(close, 10) - ts_decay_linear(ts_delta(volume, 10), 10)), 10)
+2026-03-20 05:56:23,224 | INFO | events | preparing template=volatility_reversion expression=zscore(((close - ts_mean(close, 10)) / (1 + ts_std_dev(close, 10))))
+2026-03-20 05:58:49,707 | INFO | events | completed alpha_id=600 status=complete sharpe=-1.6800 fitness=-0.9200
+2026-03-20 05:58:49,928 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(operating_margin, 60) - ts_rank(cashflow, 60)))
+2026-03-20 05:58:56,819 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((sales / (1 + eps)), 120) - ts_rank(eps, 120)))
+2026-03-20 06:09:46,161 | INFO | events | preparing template=breakout expression=ts_rank(((vwap - ts_min(vwap, 120)) / (1 + (ts_max(vwap, 120) - ts_min(vwap, 120)))), 120)
+2026-03-20 06:09:56,132 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 20)), industry))
+2026-03-20 06:11:21,906 | INFO | events | completed alpha_id=619 status=complete sharpe=0.0100 fitness=0.0000
+2026-03-20 06:11:21,938 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 40)) / (1 + ts_std_dev(returns, 40))))
+2026-03-20 06:13:39,987 | INFO | events | completed alpha_id=620 status=complete sharpe=-1.0300 fitness=-0.3400
+2026-03-20 06:13:40,184 | INFO | events | preparing template=breakout expression=zscore(((eps - ts_min(eps, 60)) / (1 + (ts_max(eps, 60) - ts_min(eps, 60)))))
+2026-03-20 06:13:46,945 | INFO | events | preparing template=volatility_reversion expression=zscore(((eps - ts_mean(eps, 20)) / (1 + ts_std_dev(eps, 20))))
+2026-03-20 06:15:30,847 | INFO | events | completed alpha_id=625 status=complete sharpe=0.3900 fitness=0.1300
+2026-03-20 06:15:41,845 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 10)), subindustry))
+2026-03-20 06:17:03,164 | INFO | events | completed alpha_id=643 status=complete sharpe=-1.2200 fitness=-0.5500
+2026-03-20 06:17:03,194 | INFO | events | preparing template=quality_value expression=rank((ts_rank((cashflow / (1 + sales)), 20) - ts_rank(sales, 20)))
+2026-03-20 06:18:28,795 | INFO | events | completed alpha_id=644 status=complete sharpe=0.4500 fitness=0.1400
+2026-03-20 06:18:29,032 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(close, 40) - ts_rank(close, 120)), 40)
+2026-03-20 06:20:01,431 | INFO | events | completed alpha_id=649 status=complete sharpe=-0.6200 fitness=-0.2000
+2026-03-20 06:20:01,710 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + cashflow)), 5) - ts_rank(cashflow, 5)))
+2026-03-20 06:21:28,614 | INFO | events | completed alpha_id=654 status=complete sharpe=-0.2400 fitness=-0.0400
+2026-03-20 06:21:33,914 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 40)), sector))
+2026-03-20 06:23:58,686 | INFO | events | completed alpha_id=660 status=complete sharpe=-1.0600 fitness=-0.7400
+2026-03-20 06:23:58,929 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 10)) / (1 + (ts_max(close, 10) - ts_min(close, 10)))))
+2026-03-20 06:24:05,766 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(returns, 10) - ts_rank(returns, 20)), 10)
+2026-03-20 06:25:52,228 | INFO | events | completed alpha_id=674 status=complete sharpe=0.6600 fitness=0.1000
+2026-03-20 06:25:52,507 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 10)), industry))
+2026-03-20 06:27:24,843 | INFO | events | completed alpha_id=680 status=complete sharpe=-0.8800 fitness=-0.2600
+2026-03-20 06:27:36,068 | INFO | events | preparing template=quality_value expression=rank((ts_rank((eps / (1 + operating_margin)), 60) - ts_rank(operating_margin, 60)))
+2026-03-20 06:27:48,064 | INFO | events | preparing template=volatility_reversion expression=zscore(((close - ts_mean(close, 5)) / (1 + ts_std_dev(close, 5))))
+2026-03-20 06:30:21,741 | INFO | events | completed alpha_id=710 status=complete sharpe=-1.8400 fitness=-0.8600
+2026-03-20 06:30:21,968 | INFO | events | preparing template=volatility_reversion expression=rank(((sales - ts_mean(sales, 10)) / (1 + ts_std_dev(sales, 10))))
+2026-03-20 06:32:26,379 | INFO | events | completed alpha_id=715 status=complete sharpe=-0.7700 fitness=-0.2800
+2026-03-20 06:32:31,635 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(vwap, 10) - ts_decay_linear(ts_delta(adv20, 10), 3)), 10)
+2026-03-20 06:43:13,867 | INFO | events | preparing template=breakout expression=rank(((high - ts_min(high, 40)) / (1 + (ts_max(high, 40) - ts_min(high, 40)))))
+2026-03-20 06:43:15,174 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 40)), industry))
+2026-03-20 06:45:33,387 | INFO | events | completed alpha_id=734 status=complete sharpe=-1.2300 fitness=-0.8600
+2026-03-20 06:45:33,884 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 20) - ts_rank(cashflow, 20)))
+2026-03-20 06:47:39,243 | INFO | events | completed alpha_id=744 status=complete sharpe=0.3100 fitness=0.0700
+2026-03-20 06:47:44,467 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(cashflow, 120) - ts_rank(operating_margin, 120)))
+2026-03-20 06:47:45,759 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(close, 5) - ts_decay_linear(ts_delta(volume, 5), 10)))
+2026-03-20 06:58:24,252 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 40)), industry))
+2026-03-20 07:00:46,736 | INFO | events | completed alpha_id=754 status=complete sharpe=0.6300 fitness=0.2300
+2026-03-20 07:00:52,257 | INFO | events | preparing template=volatility_reversion expression=rank(((vwap - ts_mean(vwap, 40)) / (1 + ts_std_dev(vwap, 40))))
+2026-03-20 07:02:21,489 | INFO | events | completed alpha_id=764 status=complete sharpe=-1.0300 fitness=-0.7000
+2026-03-20 07:02:21,514 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 40)), subindustry))
+2026-03-20 07:03:47,076 | INFO | events | completed alpha_id=765 status=complete sharpe=-1.3100 fitness=-0.8500
+2026-03-20 07:03:52,767 | INFO | events | preparing template=volatility_reversion expression=rank(((close - ts_mean(close, 20)) / (1 + ts_std_dev(close, 20))))
+2026-03-20 07:06:24,667 | INFO | events | completed alpha_id=779 status=complete sharpe=-1.3900 fitness=-0.8500
+2026-03-20 07:06:24,693 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(close, 20) - ts_decay_linear(ts_delta(adv20, 20), 3)))
+2026-03-20 07:17:17,987 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 10)), sector))
+2026-03-20 07:19:45,921 | INFO | events | completed alpha_id=785 status=complete sharpe=-1.3700 fitness=-0.7200
+2026-03-20 07:19:51,437 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(book_value, 120) - ts_rank(eps, 120)))
+2026-03-20 07:19:58,186 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 20)), sector))
+2026-03-20 07:22:06,464 | INFO | events | completed alpha_id=799 status=complete sharpe=-1.4300 fitness=-0.8700
+2026-03-20 07:22:06,702 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + cashflow)), 120) - ts_rank(cashflow, 120)))
+2026-03-20 07:22:13,346 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(vwap, 20) - ts_rank(vwap, 60)), 20)
+2026-03-20 07:23:39,729 | INFO | events | completed alpha_id=809 status=complete sharpe=-1.3100 fitness=-0.5000
+2026-03-20 07:23:39,763 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 40)), sector))
+2026-03-20 07:25:22,796 | INFO | events | completed alpha_id=810 status=complete sharpe=-1.2200 fitness=-0.3800
+2026-03-20 07:25:22,986 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 5)), sector))
+2026-03-20 07:27:25,062 | INFO | events | completed alpha_id=814 status=complete sharpe=-1.1400 fitness=-0.4500
+2026-03-20 07:27:30,586 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(book_value, 60) - ts_rank(cashflow, 60)))
+2026-03-20 07:27:31,909 | INFO | events | preparing template=momentum expression=rank((ts_rank(vwap, 20) - ts_rank(vwap, 120)))
+2026-03-20 07:29:36,618 | INFO | events | completed alpha_id=825 status=complete sharpe=-0.6800 fitness=-0.2800
+2026-03-20 07:29:36,791 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(returns, 20) - ts_rank(returns, 60)), 20)
+2026-03-20 07:31:22,038 | INFO | events | completed alpha_id=829 status=complete sharpe=0.3200 fitness=0.0400
+2026-03-20 07:31:22,326 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 40)) / (1 + ts_std_dev(returns, 40))))
+2026-03-20 07:32:42,323 | INFO | events | completed alpha_id=835 status=complete sharpe=-1.2200 fitness=-0.3800
+2026-03-20 07:32:47,576 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(close, 60) - ts_decay_linear(ts_delta(adv20, 60), 5)))
+2026-03-20 07:43:32,669 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(vwap, 10) - ts_rank(vwap, 20)), 10)
+2026-03-20 07:44:45,948 | INFO | events | completed alpha_id=853 status=complete sharpe=-1.2400 fitness=-0.3700
+2026-03-20 07:44:45,983 | INFO | events | preparing template=quality_value expression=rank((ts_rank((operating_margin / (1 + cashflow)), 20) - ts_rank(cashflow, 20)))
+2026-03-20 07:44:47,835 | INFO | events | preparing template=volatility_reversion expression=zscore(((returns - ts_mean(returns, 120)) / (1 + ts_std_dev(returns, 120))))
+2026-03-20 07:46:05,296 | INFO | events | completed alpha_id=859 status=complete sharpe=-1.1000 fitness=-0.3800
+2026-03-20 07:46:05,328 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 40)), sector))
+2026-03-20 07:47:23,999 | INFO | events | completed alpha_id=860 status=complete sharpe=-0.9800 fitness=-0.3200
+2026-03-20 07:47:24,240 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 40)), industry))
+2026-03-20 07:48:50,979 | INFO | events | completed alpha_id=865 status=complete sharpe=-1.1900 fitness=-0.3600
+2026-03-20 07:49:01,931 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(close, 10) - ts_decay_linear(ts_delta(adv20, 10), 5)))
+2026-03-20 07:59:37,437 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((vwap - ts_mean(vwap, 60)) / (1 + ts_std_dev(vwap, 60))), 60)
+2026-03-20 08:00:52,251 | INFO | events | completed alpha_id=885 status=complete sharpe=-0.8900 fitness=-0.4500
+2026-03-20 08:00:52,435 | INFO | events | preparing template=quality_value expression=rank((ts_rank((eps / (1 + operating_margin)), 40) - ts_rank(operating_margin, 40)))
+2026-03-20 08:00:59,498 | INFO | events | preparing template=breakout expression=ts_rank(((high - ts_min(high, 20)) / (1 + (ts_max(high, 20) - ts_min(high, 20)))), 20)
+2026-03-20 08:01:07,930 | INFO | events | preparing template=breakout expression=ts_rank(((high - ts_min(high, 40)) / (1 + (ts_max(high, 40) - ts_min(high, 40)))), 40)
+2026-03-20 08:01:14,447 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 20)), industry))
+2026-03-20 08:02:51,167 | INFO | events | completed alpha_id=915 status=complete sharpe=-1.4600 fitness=-0.9200
+2026-03-20 08:02:57,338 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(close, 120) - ts_rank(eps, 120)))
+2026-03-20 08:04:25,635 | INFO | events | completed alpha_id=939 status=complete sharpe=-0.6800 fitness=-0.3800
+2026-03-20 08:04:30,909 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(book_value, 20) - ts_rank(cashflow, 20)))
+2026-03-20 08:04:38,151 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 10)), industry))
+2026-03-20 08:07:00,738 | INFO | events | completed alpha_id=965 status=complete sharpe=0.1600 fitness=0.0300
+2026-03-20 08:07:06,471 | INFO | events | preparing template=volatility_reversion expression=zscore(((book_value - ts_mean(book_value, 60)) / (1 + ts_std_dev(book_value, 60))))
+2026-03-20 08:07:18,377 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(adv20, 5), 5)))
+2026-03-20 08:18:04,322 | INFO | events | preparing template=breakout expression=ts_rank(((low - ts_min(low, 120)) / (1 + (ts_max(low, 120) - ts_min(low, 120)))), 120)
+2026-03-20 08:18:16,762 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(eps, 60) - ts_decay_linear(ts_delta(adv20, 60), 5)))
+2026-03-20 08:29:15,444 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + book_value)), 20) - ts_rank(book_value, 20)))
+2026-03-20 08:29:16,763 | INFO | events | preparing template=breakout expression=ts_rank(((low - ts_min(low, 60)) / (1 + (ts_max(low, 60) - ts_min(low, 60)))), 60)
+2026-03-20 08:29:24,453 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(close, 10) - ts_rank(close, 60)), 10)
+2026-03-20 08:31:32,947 | INFO | events | completed alpha_id=1034 status=complete sharpe=-1.7100 fitness=-0.6200
+2026-03-20 08:31:32,978 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 10)), industry))
+2026-03-20 08:33:08,918 | INFO | events | completed alpha_id=1035 status=complete sharpe=-1.7200 fitness=-0.9500
+2026-03-20 08:33:09,389 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((eps / (1 + sales)), 10) - ts_rank(sales, 10)))
+2026-03-20 08:35:11,233 | INFO | events | completed alpha_id=1044 status=complete sharpe=0.5100 fitness=0.1600
+2026-03-20 08:35:22,314 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 08:35:24,046 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 40)), sector))
+2026-03-20 08:37:05,692 | INFO | events | completed alpha_id=1075 status=complete sharpe=0.0800 fitness=0.0200
+2026-03-20 08:37:10,908 | INFO | events | preparing template=breakout expression=rank(((low - ts_min(low, 120)) / (1 + (ts_max(low, 120) - ts_min(low, 120)))))
+2026-03-20 08:37:17,884 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(close, 10) - ts_decay_linear(ts_delta(volume, 10), 3)))
+2026-03-20 08:47:52,280 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((vwap - ts_mean(vwap, 40)) / (1 + ts_std_dev(vwap, 40))), 40)
+2026-03-20 08:49:17,618 | INFO | events | completed alpha_id=1104 status=complete sharpe=-0.9600 fitness=-0.4600
+2026-03-20 08:49:17,649 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((eps - ts_mean(eps, 40)) / (1 + ts_std_dev(eps, 40))), 40)
+2026-03-20 08:50:37,756 | INFO | events | completed alpha_id=1105 status=complete sharpe=-0.4200 fitness=-0.1200
+2026-03-20 08:50:43,222 | INFO | events | preparing template=volatility_reversion expression=rank(((vwap - ts_mean(vwap, 20)) / (1 + ts_std_dev(vwap, 20))))
+2026-03-20 08:52:29,310 | INFO | events | completed alpha_id=1114 status=complete sharpe=-1.2800 fitness=-0.7900
+2026-03-20 08:52:35,305 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((returns - ts_mean(returns, 60)), industry))
+2026-03-20 08:54:01,879 | INFO | events | completed alpha_id=1135 status=complete sharpe=-1.1600 fitness=-0.3500
+2026-03-20 08:54:07,366 | INFO | events | preparing template=quality_value expression=rank((ts_rank((high / (1 + cashflow)), 10) - ts_rank(cashflow, 10)))
+2026-03-20 08:56:12,600 | INFO | events | completed alpha_id=1145 status=complete sharpe=-1.1100 fitness=-0.2900
+2026-03-20 08:56:12,754 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 10)), subindustry))
+2026-03-20 08:57:28,263 | INFO | events | completed alpha_id=1149 status=complete sharpe=0.0500 fitness=0.0100
+2026-03-20 08:57:39,525 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 20)), sector))
+2026-03-20 09:00:23,122 | INFO | events | completed alpha_id=1175 status=complete sharpe=0.2900 fitness=0.0600
+2026-03-20 09:00:23,327 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 10)), industry))
+2026-03-20 09:01:32,989 | INFO | events | completed alpha_id=1180 status=complete sharpe=-1.2700 fitness=-0.6800
+2026-03-20 09:01:38,429 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(returns, 5) - ts_rank(sales, 5)))
+2026-03-20 09:03:45,453 | INFO | events | completed alpha_id=1189 status=complete sharpe=-1.1300 fitness=-0.2600
+2026-03-20 09:03:45,726 | INFO | events | preparing template=volatility_reversion expression=zscore(((vwap - ts_mean(vwap, 5)) / (1 + ts_std_dev(vwap, 5))))
+2026-03-20 09:06:21,164 | INFO | events | completed alpha_id=1195 status=complete sharpe=-1.6800 fitness=-0.7800
+2026-03-20 09:06:26,641 | INFO | events | preparing template=quality_value expression=rank((ts_rank((book_value / (1 + operating_margin)), 10) - ts_rank(operating_margin, 10)))
+2026-03-20 09:06:27,917 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((vwap - ts_mean(vwap, 5)) / (1 + ts_std_dev(vwap, 5))), 5)
+2026-03-20 09:08:35,420 | INFO | events | completed alpha_id=1205 status=complete sharpe=-1.0300 fitness=-0.2800
+2026-03-20 09:08:40,898 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(close, 10) - ts_decay_linear(ts_delta(adv20, 10), 3)), 10)
+2026-03-20 09:19:26,235 | INFO | events | preparing template=quality_value expression=rank((ts_rank((eps / (1 + sales)), 10) - ts_rank(sales, 10)))
+2026-03-20 09:21:38,929 | INFO | events | completed alpha_id=1224 status=complete sharpe=0.6700 fitness=0.2500
+2026-03-20 09:21:38,964 | INFO | events | preparing template=quality_value expression=rank((ts_rank((returns / (1 + book_value)), 60) - ts_rank(book_value, 60)))
+2026-03-20 09:21:50,696 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((cashflow / (1 + sales)), 120) - ts_rank(sales, 120)))
+2026-03-20 09:24:15,283 | INFO | events | completed alpha_id=1230 status=complete sharpe=0.1700 fitness=0.0400
+2026-03-20 09:24:15,511 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(operating_margin, 40) - ts_rank(eps, 40)))
+2026-03-20 09:24:32,430 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(eps, 5) - ts_rank(cashflow, 5)))
+2026-03-20 09:27:06,643 | INFO | events | completed alpha_id=1235 status=complete sharpe=0.2400 fitness=0.0400
+2026-03-20 09:27:06,895 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 20)), sector))
+2026-03-20 09:29:01,132 | INFO | events | completed alpha_id=1240 status=complete sharpe=-1.2900 fitness=-0.7800
+2026-03-20 09:29:06,606 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(eps, 10) - ts_rank(eps, 20)), 10)
+2026-03-20 09:30:42,860 | INFO | events | completed alpha_id=1249 status=complete sharpe=0.8700 fitness=0.2900
+2026-03-20 09:30:48,546 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 20)), industry))
+2026-03-20 09:32:09,008 | INFO | events | completed alpha_id=1264 status=complete sharpe=-1.1800 fitness=-0.7500
+2026-03-20 09:32:20,374 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((close - ts_mean(close, 40)) / (1 + ts_std_dev(close, 40))), 40)
+2026-03-20 09:33:56,470 | INFO | events | completed alpha_id=1290 status=complete sharpe=-1.0900 fitness=-0.5300
+2026-03-20 09:33:56,892 | INFO | events | preparing template=volatility_reversion expression=rank(((close - ts_mean(close, 40)) / (1 + ts_std_dev(close, 40))))
+2026-03-20 09:36:25,746 | INFO | events | completed alpha_id=1299 status=complete sharpe=-1.1200 fitness=-0.7600
+2026-03-20 09:36:30,993 | INFO | events | preparing template=volatility_reversion expression=zscore(((vwap - ts_mean(vwap, 60)) / (1 + ts_std_dev(vwap, 60))))
+2026-03-20 09:39:04,716 | INFO | events | completed alpha_id=1305 status=complete sharpe=-0.9700 fitness=-0.7300
+2026-03-20 09:39:05,181 | INFO | events | preparing template=volatility_reversion expression=zscore(((vwap - ts_mean(vwap, 20)) / (1 + ts_std_dev(vwap, 20))))
+2026-03-20 09:40:36,207 | INFO | events | completed alpha_id=1314 status=complete sharpe=-1.2300 fitness=-0.7400
+2026-03-20 09:40:41,771 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((high - ts_mean(high, 5)), industry))
+2026-03-20 09:43:36,908 | INFO | events | completed alpha_id=1324 status=complete sharpe=-1.7000 fitness=-0.7600
+2026-03-20 09:43:37,136 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 5)) / (1 + (ts_max(close, 5) - ts_min(close, 5)))))
+2026-03-20 09:43:48,900 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 60) - ts_rank(book_value, 60)))
+2026-03-20 09:43:55,885 | INFO | events | preparing template=breakout expression=ts_rank(((high - ts_min(high, 120)) / (1 + (ts_max(high, 120) - ts_min(high, 120)))), 120)
+2026-03-20 09:43:57,180 | INFO | events | preparing template=breakout expression=ts_rank(((low - ts_min(low, 20)) / (1 + (ts_max(low, 20) - ts_min(low, 20)))), 20)
+2026-03-20 09:44:00,276 | INFO | events | preparing template=breakout expression=ts_rank(((eps - ts_min(eps, 5)) / (1 + (ts_max(eps, 5) - ts_min(eps, 5)))), 5)
+2026-03-20 09:44:07,073 | INFO | events | preparing template=breakout expression=rank(((high - ts_min(high, 60)) / (1 + (ts_max(high, 60) - ts_min(high, 60)))))
+2026-03-20 09:44:19,358 | INFO | events | preparing template=price_volume_divergence expression=zscore((ts_delta(vwap, 5) - ts_decay_linear(ts_delta(volume, 5), 5)))
+2026-03-20 09:54:57,639 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 10)), sector))
+2026-03-20 09:56:11,562 | INFO | events | completed alpha_id=1399 status=complete sharpe=-1.6700 fitness=-0.9100
+2026-03-20 09:56:11,794 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 40) - ts_rank(sales, 40)))
+2026-03-20 09:57:33,233 | INFO | events | completed alpha_id=1404 status=complete sharpe=0.2600 fitness=0.0700
+2026-03-20 09:57:38,988 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(eps, 10) - ts_decay_linear(ts_delta(adv20, 10), 3)), 10)
+2026-03-20 10:08:14,191 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(close, 60) - ts_rank(close, 120)), 60)
+2026-03-20 10:09:29,580 | INFO | events | completed alpha_id=1425 status=complete sharpe=-0.6800 fitness=-0.2500
+2026-03-20 10:09:29,772 | INFO | events | preparing template=volatility_reversion expression=rank(((book_value - ts_mean(book_value, 120)) / (1 + ts_std_dev(book_value, 120))))
+2026-03-20 10:09:36,833 | INFO | events | preparing template=breakout expression=ts_rank(((low - ts_min(low, 40)) / (1 + (ts_max(low, 40) - ts_min(low, 40)))), 40)
+2026-03-20 10:09:43,334 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 120) - ts_rank(cashflow, 120)))
+2026-03-20 10:12:43,992 | INFO | events | completed alpha_id=1440 status=complete sharpe=-0.0200 fitness=-0.0000
+2026-03-20 10:12:49,742 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(sales, 20) - ts_rank(book_value, 20)))
+2026-03-20 10:12:51,485 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((sales - ts_mean(sales, 10)) / (1 + ts_std_dev(sales, 10))), 10)
+2026-03-20 10:14:06,561 | INFO | events | completed alpha_id=1465 status=complete sharpe=0.0900 fitness=0.0100
+2026-03-20 10:14:12,266 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(vwap, 5) - ts_rank(eps, 5)))
+2026-03-20 10:15:34,639 | INFO | events | completed alpha_id=1479 status=complete sharpe=-1.7000 fitness=-0.7000
+2026-03-20 10:15:34,675 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(returns, 20) - ts_rank(eps, 20)))
+2026-03-20 10:16:49,772 | INFO | events | completed alpha_id=1480 status=complete sharpe=-1.3900 fitness=-0.3800
+2026-03-20 10:16:55,252 | INFO | events | preparing template=momentum expression=rank((ts_rank(book_value, 10) - ts_rank(book_value, 60)))
+2026-03-20 10:16:56,771 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 10)), industry))
+2026-03-20 10:18:22,446 | INFO | events | completed alpha_id=1494 status=complete sharpe=-1.6300 fitness=-0.9200
+2026-03-20 10:18:22,483 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(eps, 60) - ts_rank(sales, 60)))
+2026-03-20 10:20:32,530 | INFO | events | completed alpha_id=1495 status=complete sharpe=0.1600 fitness=0.0300
+2026-03-20 10:20:38,014 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((book_value - ts_mean(book_value, 60)), industry))
+2026-03-20 10:20:44,778 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(book_value, 60) - ts_rank(operating_margin, 60)))
+2026-03-20 10:21:07,543 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 20) - ts_rank(book_value, 20)))
+2026-03-20 10:21:08,843 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((operating_margin / (1 + eps)), 120) - ts_rank(eps, 120)))
+2026-03-20 10:21:32,669 | INFO | events | preparing template=breakout expression=zscore(((low - ts_min(low, 10)) / (1 + (ts_max(low, 10) - ts_min(low, 10)))))
+2026-03-20 10:21:34,026 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((book_value - ts_mean(book_value, 60)) / (1 + ts_std_dev(book_value, 60))), 60)
+2026-03-20 10:21:41,131 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(vwap, 20) - ts_decay_linear(ts_delta(volume, 20), 3)), 20)
+2026-03-20 10:32:24,337 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(cashflow, 20) - ts_rank(sales, 20)))
+2026-03-20 10:33:51,336 | INFO | events | completed alpha_id=1545 status=complete sharpe=0.6400 fitness=0.2400
+2026-03-20 10:33:51,893 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(vwap, 10) - ts_decay_linear(ts_delta(volume, 10), 3)))
+2026-03-20 10:44:34,461 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((vwap - ts_mean(vwap, 10)) / (1 + ts_std_dev(vwap, 10))), 10)
+2026-03-20 10:46:52,099 | INFO | events | completed alpha_id=1564 status=complete sharpe=-1.7900 fitness=-0.7800
+2026-03-20 10:46:52,323 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(book_value, 10) - ts_rank(cashflow, 10)))
+2026-03-20 10:46:53,792 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(eps, 120) - ts_rank(sales, 120)))
+2026-03-20 10:49:26,646 | INFO | events | completed alpha_id=1570 status=complete sharpe=0.3900 fitness=0.1300
+2026-03-20 10:49:32,429 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(eps, 20) - ts_rank(eps, 60)), 20)
+2026-03-20 10:50:52,563 | INFO | events | completed alpha_id=1585 status=complete sharpe=-0.2000 fitness=-0.0400
+2026-03-20 10:50:58,262 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(eps, 5) - ts_rank(eps, 20)), 5)
+2026-03-20 10:52:45,938 | INFO | events | completed alpha_id=1599 status=complete sharpe=0.7900 fitness=0.2400
+2026-03-20 10:52:51,226 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((cashflow / (1 + eps)), 60) - ts_rank(eps, 60)))
+2026-03-20 11:03:38,148 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 5)), sector))
+2026-03-20 11:04:49,494 | INFO | events | completed alpha_id=1615 status=complete sharpe=-1.8600 fitness=-0.8600
+2026-03-20 11:04:55,199 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 40)), industry))
+2026-03-20 11:07:28,590 | INFO | events | completed alpha_id=1629 status=complete sharpe=-1.1400 fitness=-0.8100
+2026-03-20 11:07:34,333 | INFO | events | preparing template=quality_value expression=rank((ts_rank((eps / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 11:08:48,965 | INFO | events | completed alpha_id=1635 status=complete sharpe=0.1300 fitness=0.0200
+2026-03-20 11:08:54,904 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 20)), industry))
+2026-03-20 11:12:14,788 | INFO | events | completed alpha_id=1654 status=complete sharpe=-0.9500 fitness=-0.3000
+2026-03-20 11:12:20,364 | INFO | events | preparing template=volatility_reversion expression=zscore(((vwap - ts_mean(vwap, 40)) / (1 + ts_std_dev(vwap, 40))))
+2026-03-20 11:14:32,890 | INFO | events | completed alpha_id=1665 status=complete sharpe=-1.0300 fitness=-0.7000
+2026-03-20 11:14:38,591 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(vwap, 10) - ts_decay_linear(ts_delta(volume, 10), 10)), 10)
+2026-03-20 11:25:29,299 | INFO | events | preparing template=breakout expression=rank(((close - ts_min(close, 40)) / (1 + (ts_max(close, 40) - ts_min(close, 40)))))
+2026-03-20 11:25:36,159 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(eps, 60) - ts_rank(book_value, 60)))
+2026-03-20 11:25:37,437 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(book_value, 120) - ts_rank(operating_margin, 120)))
+2026-03-20 11:25:45,164 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(book_value, 5) - ts_rank(eps, 5)))
+2026-03-20 11:26:00,118 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 10) - ts_rank(book_value, 10)))
+2026-03-20 11:26:01,624 | INFO | events | preparing template=volatility_reversion expression=rank(((returns - ts_mean(returns, 120)) / (1 + ts_std_dev(returns, 120))))
+2026-03-20 11:27:19,018 | INFO | events | completed alpha_id=1720 status=complete sharpe=-1.2800 fitness=-0.4100
+2026-03-20 11:27:24,739 | INFO | events | preparing template=volatility_reversion expression=zscore(((close - ts_mean(close, 40)) / (1 + ts_std_dev(close, 40))))
+2026-03-20 11:29:37,772 | INFO | events | completed alpha_id=1725 status=complete sharpe=-1.1400 fitness=-0.7800
+2026-03-20 11:29:38,279 | INFO | events | preparing template=mean_reversion expression=ts_rank(group_neutralize((vwap - ts_mean(vwap, 20)), sector), 20)
+2026-03-20 11:31:03,773 | INFO | events | completed alpha_id=1735 status=complete sharpe=-1.4600 fitness=-0.6800
+2026-03-20 11:31:09,010 | INFO | events | preparing template=quality_value expression=rank((ts_rank((sales / (1 + book_value)), 120) - ts_rank(book_value, 120)))
+2026-03-20 11:31:10,476 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((vwap - ts_mean(vwap, 20)) / (1 + ts_std_dev(vwap, 20))), 20)
+2026-03-20 11:32:56,183 | INFO | events | completed alpha_id=1744 status=complete sharpe=-1.3400 fitness=-0.6100
+2026-03-20 11:32:56,415 | INFO | events | preparing template=fundamental_cross expression=ts_rank((ts_rank(eps, 10) - ts_rank(sales, 10)), 10)
+2026-03-20 11:35:08,963 | INFO | events | completed alpha_id=1749 status=complete sharpe=-0.6800 fitness=-0.2200
+2026-03-20 11:35:25,889 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((close - ts_mean(close, 10)), subindustry))
+2026-03-20 11:37:53,844 | INFO | events | completed alpha_id=1785 status=complete sharpe=-1.9100 fitness=-0.9500
+2026-03-20 11:37:54,031 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((low - ts_mean(low, 40)), industry))
+2026-03-20 11:39:21,844 | INFO | events | completed alpha_id=1789 status=complete sharpe=-1.1100 fitness=-0.7700
+2026-03-20 11:39:22,133 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 5)), industry))
+2026-03-20 11:40:58,246 | INFO | events | completed alpha_id=1795 status=complete sharpe=-1.1400 fitness=-0.4500
+2026-03-20 11:41:03,770 | INFO | events | preparing template=volatility_reversion expression=ts_rank(((returns - ts_mean(returns, 60)) / (1 + ts_std_dev(returns, 60))), 60)
+2026-03-20 11:43:05,287 | INFO | events | completed alpha_id=1805 status=complete sharpe=-1.4000 fitness=-0.4000
+2026-03-20 11:43:11,304 | INFO | events | preparing template=momentum expression=rank((ts_rank(sales, 10) - ts_rank(sales, 20)))
+2026-03-20 11:46:01,031 | INFO | events | completed alpha_id=1825 status=complete sharpe=0.5700 fitness=0.2000
+2026-03-20 11:46:06,163 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((close - ts_mean(close, 40)), industry))
+2026-03-20 11:47:26,059 | INFO | events | completed alpha_id=1830 status=complete sharpe=-1.0600 fitness=-0.7400
+2026-03-20 11:47:37,443 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 40)), subindustry))
+2026-03-20 11:49:54,951 | INFO | events | completed alpha_id=1860 status=complete sharpe=-0.8300 fitness=-0.4600
+2026-03-20 11:49:55,173 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(returns, 20) - ts_rank(sales, 20)))
+2026-03-20 11:51:41,319 | INFO | events | completed alpha_id=1865 status=complete sharpe=-1.4500 fitness=-0.4200
+2026-03-20 11:51:41,553 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 40)), industry))
+2026-03-20 11:54:29,013 | INFO | events | completed alpha_id=1870 status=complete sharpe=-0.9100 fitness=-0.6200
+2026-03-20 11:54:34,737 | INFO | events | preparing template=mean_reversion expression=ts_rank(group_neutralize((returns - ts_mean(returns, 10)), industry), 10)
+2026-03-20 11:55:53,492 | INFO | events | completed alpha_id=1884 status=complete sharpe=-0.6600 fitness=-0.1400
+2026-03-20 11:56:04,742 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(cashflow, 40) - ts_rank(sales, 40)))
+2026-03-20 11:57:20,135 | INFO | events | completed alpha_id=1910 status=complete sharpe=-0.2700 fitness=-0.0800
+2026-03-20 11:57:27,619 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(close, 5) - ts_rank(close, 120)), 5)
+2026-03-20 11:59:24,135 | INFO | events | completed alpha_id=1930 status=complete sharpe=-0.5100 fitness=-0.0900
+2026-03-20 11:59:29,762 | INFO | events | preparing template=volatility_reversion expression=rank(((cashflow - ts_mean(cashflow, 20)) / (1 + ts_std_dev(cashflow, 20))))
+2026-03-20 12:01:00,206 | INFO | events | completed alpha_id=1944 status=complete sharpe=-0.6500 fitness=-0.3200
+2026-03-20 12:01:11,247 | INFO | events | preparing template=quality_value expression=rank((ts_rank((cashflow / (1 + eps)), 120) - ts_rank(eps, 120)))
+2026-03-20 12:11:45,535 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((book_value / (1 + operating_margin)), 60) - ts_rank(operating_margin, 60)))
+2026-03-20 12:11:58,446 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(operating_margin, 120) - ts_rank(sales, 120)))
+2026-03-20 12:12:05,335 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(cashflow, 20) - ts_rank(operating_margin, 20)))
+2026-03-20 12:12:12,191 | INFO | events | preparing template=volatility_reversion expression=rank(((vwap - ts_mean(vwap, 60)) / (1 + ts_std_dev(vwap, 60))))
+2026-03-20 12:13:40,738 | INFO | events | completed alpha_id=2009 status=complete sharpe=-0.9700 fitness=-0.7300
+2026-03-20 12:13:52,457 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(eps, 40) - ts_rank(eps, 60)), 40)
+2026-03-20 12:15:23,566 | INFO | events | completed alpha_id=2044 status=complete sharpe=-0.4700 fitness=-0.1400
+2026-03-20 12:15:29,347 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(close, 10) - ts_rank(close, 20)), 10)
+2026-03-20 12:17:20,707 | INFO | events | completed alpha_id=2060 status=complete sharpe=-1.3100 fitness=-0.3900
+2026-03-20 12:17:20,939 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(eps, 10) - ts_rank(eps, 60)), 10)
+2026-03-20 12:19:38,565 | INFO | events | completed alpha_id=2065 status=complete sharpe=0.5800 fitness=0.1900
+2026-03-20 12:19:44,041 | INFO | events | preparing template=fundamental_cross expression=ts_rank((ts_rank(vwap, 10) - ts_rank(eps, 10)), 10)
+2026-03-20 12:22:54,629 | INFO | events | completed alpha_id=2074 status=complete sharpe=-1.7400 fitness=-0.6800
+2026-03-20 12:22:54,852 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(close, 20) - ts_rank(cashflow, 20)))
+2026-03-20 12:24:43,592 | INFO | events | completed alpha_id=2079 status=complete sharpe=-1.2900 fitness=-0.6700
+2026-03-20 12:24:49,374 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((eps - ts_mean(eps, 60)), sector))
+2026-03-20 12:27:01,945 | INFO | events | completed alpha_id=2094 status=complete sharpe=-0.0300 fitness=-0.0000
+2026-03-20 12:27:01,968 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(returns, 20) - ts_rank(sales, 20)))
+2026-03-20 12:28:50,841 | INFO | events | completed alpha_id=2095 status=complete sharpe=-1.4400 fitness=-0.4100
+2026-03-20 12:28:56,237 | INFO | events | preparing template=volatility_reversion expression=rank(((book_value - ts_mean(book_value, 60)) / (1 + ts_std_dev(book_value, 60))))
+2026-03-20 12:28:57,659 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(close, 40) - ts_rank(sales, 40)))
+2026-03-20 12:30:49,957 | INFO | events | completed alpha_id=2110 status=complete sharpe=-0.9400 fitness=-0.4900
+2026-03-20 12:30:55,165 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(close, 60) - ts_decay_linear(ts_delta(adv20, 60), 5)))
+2026-03-20 12:41:40,245 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(sales, 20) - ts_rank(operating_margin, 20)))
+2026-03-20 12:41:57,705 | INFO | events | preparing template=momentum expression=ts_rank((ts_rank(returns, 5) - ts_rank(returns, 20)), 5)
+2026-03-20 12:43:28,039 | INFO | events | completed alpha_id=2169 status=complete sharpe=0.8200 fitness=0.1400
+2026-03-20 12:43:33,550 | INFO | events | preparing template=price_volume_divergence expression=rank((ts_delta(eps, 20) - ts_decay_linear(ts_delta(adv20, 20), 10)))
+2026-03-20 12:54:09,380 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((sales / (1 + book_value)), 120) - ts_rank(book_value, 120)))
+2026-03-20 12:54:15,957 | INFO | events | preparing template=momentum expression=rank((ts_rank(returns, 20) - ts_rank(returns, 120)))
+2026-03-20 12:56:47,113 | INFO | events | completed alpha_id=2190 status=complete sharpe=0.8200 fitness=0.1600
+2026-03-20 12:56:52,810 | INFO | events | preparing template=quality_value expression=rank((ts_rank((high / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 12:58:13,314 | INFO | events | completed alpha_id=2210 status=complete sharpe=-0.4300 fitness=-0.1100
+2026-03-20 12:58:18,988 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((vwap - ts_mean(vwap, 10)), subindustry))
+2026-03-20 12:59:54,488 | INFO | events | completed alpha_id=2229 status=complete sharpe=-1.8300 fitness=-0.9300
+2026-03-20 12:59:54,515 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(close, 5) - ts_rank(volume, 5)))
+2026-03-20 13:01:04,391 | INFO | events | completed alpha_id=2230 status=complete sharpe=-2.0300 fitness=-0.7100
+2026-03-20 13:01:09,776 | INFO | events | preparing template=volatility_reversion expression=zscore(((cashflow - ts_mean(cashflow, 10)) / (1 + ts_std_dev(cashflow, 10))))
+2026-03-20 13:02:29,605 | INFO | events | completed alpha_id=2240 status=complete sharpe=-0.2800 fitness=-0.0700
+2026-03-20 13:02:35,145 | INFO | events | preparing template=volatility_reversion expression=zscore(((eps - ts_mean(eps, 10)) / (1 + ts_std_dev(eps, 10))))
+2026-03-20 13:04:31,403 | INFO | events | completed alpha_id=2255 status=complete sharpe=0.2700 fitness=0.0600
+2026-03-20 13:04:36,774 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((sales / (1 + book_value)), 20) - ts_rank(book_value, 20)))
+2026-03-20 13:04:49,249 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 20)), sector))
+2026-03-20 13:07:20,663 | INFO | events | completed alpha_id=2299 status=complete sharpe=-1.1800 fitness=-0.7500
+2026-03-20 13:07:26,069 | INFO | events | preparing template=quality_value expression=zscore((ts_rank((book_value / (1 + cashflow)), 60) - ts_rank(cashflow, 60)))
+2026-03-20 13:07:32,683 | INFO | events | preparing template=mean_reversion expression=ts_rank(group_neutralize((eps - ts_mean(eps, 5)), sector), 5)
+2026-03-20 13:08:49,221 | INFO | events | completed alpha_id=2314 status=complete sharpe=-0.3300 fitness=-0.0500
+2026-03-20 13:08:49,418 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(returns, 120) - ts_rank(sales, 120)))
+2026-03-20 13:10:19,932 | INFO | events | completed alpha_id=2319 status=complete sharpe=-1.3500 fitness=-0.4500
+2026-03-20 13:10:41,680 | INFO | events | preparing template=price_volume_divergence expression=ts_decay_linear((ts_delta(vwap, 60) - ts_decay_linear(ts_delta(adv20, 60), 10)), 60)
+2026-03-20 13:21:20,917 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((vwap - ts_mean(vwap, 5)), industry))
+2026-03-20 13:22:32,622 | INFO | events | completed alpha_id=2389 status=complete sharpe=-0.9100 fitness=-0.3300
+2026-03-20 13:22:32,806 | INFO | events | preparing template=mean_reversion expression=rank(group_neutralize((eps - ts_mean(eps, 40)), sector))
+2026-03-20 13:23:57,924 | INFO | events | completed alpha_id=2394 status=complete sharpe=0.7900 fitness=0.3100
+2026-03-20 13:23:57,996 | INFO | events | preparing template=breakout expression=rank(((low - ts_min(low, 10)) / (1 + (ts_max(low, 10) - ts_min(low, 10)))))
+2026-03-20 13:24:15,572 | INFO | events | preparing template=fundamental_cross expression=rank((ts_rank(operating_margin, 20) - ts_rank(sales, 20)))
+2026-03-20 13:24:22,249 | INFO | events | preparing template=momentum expression=zscore((ts_rank(close, 10) - ts_rank(close, 120)))
+2026-03-20 13:25:59,647 | INFO | events | completed alpha_id=2420 status=complete sharpe=-0.9800 fitness=-0.4100
+2026-03-20 13:26:05,123 | INFO | events | preparing template=quality_value expression=rank((ts_rank((operating_margin / (1 + sales)), 60) - ts_rank(sales, 60)))
+2026-03-20 13:26:11,780 | INFO | events | preparing template=fundamental_cross expression=zscore((ts_rank(operating_margin, 120) - ts_rank(eps, 120)))
+2026-03-20 13:26:24,030 | INFO | events | preparing template=mean_reversion expression=zscore(group_neutralize((returns - ts_mean(returns, 5)), subindustry))

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Alpha Discovery Workflow"
+  short_description: "Automate hypothesis-to-GA WorldQuant alpha research"
+  default_prompt: "Use $alpha-discovery-workflow to research market-arbitrage hypotheses, simulate candidate alphas, judge quality, and promote valuable families into GA templates."

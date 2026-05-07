@@ -1,0 +1,16 @@
+expression,template_type,error
+"ts_decay_linear(sub(ts_delta(close, 5), ts_decay_linear(ts_delta(adv20, 5), 3)), 5)",price_volume_divergence,"HTTPSConnectionPool(host='api.worldquantbrain.com', port=443): Max retries exceeded with url: /authentication (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000244C47BED50>: Failed to establish a new connection: [WinError 10013] 嘗試存取通訊端被拒絕，因為存取權限不足。'))"
+"rank(group_neutralize(sub(vwap, ts_mean(vwap, 5)), subindustry))",mean_reversion,"HTTPSConnectionPool(host='api.worldquantbrain.com', port=443): Max retries exceeded with url: /authentication (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000244C51B1610>: Failed to establish a new connection: [WinError 10013] 嘗試存取通訊端被拒絕，因為存取權限不足。'))"
+"rank(group_neutralize(sub(close, ts_mean(close, 40)), industry))",mean_reversion,"HTTPSConnectionPool(host='api.worldquantbrain.com', port=443): Max retries exceeded with url: /authentication (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000244C51B2630>: Failed to establish a new connection: [WinError 10013] 嘗試存取通訊端被拒絕，因為存取權限不足。'))"
+"rank(sub(ts_rank(close, 120), ts_rank(close, 120)))",momentum,"HTTPSConnectionPool(host='api.worldquantbrain.com', port=443): Max retries exceeded with url: /authentication (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000244C51B27B0>: Failed to establish a new connection: [WinError 10013] 嘗試存取通訊端被拒絕，因為存取權限不足。'))"
+"rank(sub(ts_rank(vwap, 10), ts_rank(vwap, 120)))",momentum,"HTTPSConnectionPool(host='api.worldquantbrain.com', port=443): Max retries exceeded with url: /authentication (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000244C51B2B70>: Failed to establish a new connection: [WinError 10013] 嘗試存取通訊端被拒絕，因為存取權限不足。'))"
+"ts_decay_linear(sub(ts_delta(close, 5), ts_decay_linear(ts_delta(adv20, 5), 3)), 5)",price_volume_divergence,exact-fingerprint-match
+"rank(group_neutralize(sub(vwap, ts_mean(vwap, 5)), subindustry))",mean_reversion,exact-fingerprint-match
+"rank(group_neutralize(sub(close, ts_mean(close, 40)), industry))",mean_reversion,exact-fingerprint-match
+"rank(sub(ts_rank(close, 120), ts_rank(close, 120)))",momentum,exact-fingerprint-match
+"rank(sub(ts_rank(vwap, 10), ts_rank(vwap, 120)))",momentum,exact-fingerprint-match
+"ts_decay_linear(sub(ts_delta(close, 5), ts_decay_linear(ts_delta(adv20, 5), 3)), 5)",price_volume_divergence,exact-fingerprint-match
+"rank(group_neutralize(sub(vwap, ts_mean(vwap, 5)), subindustry))",mean_reversion,exact-fingerprint-match
+"rank(group_neutralize(sub(close, ts_mean(close, 40)), industry))",mean_reversion,exact-fingerprint-match
+"rank(sub(ts_rank(close, 120), ts_rank(close, 120)))",momentum,exact-fingerprint-match
+"rank(sub(ts_rank(vwap, 10), ts_rank(vwap, 120)))",momentum,exact-fingerprint-match
