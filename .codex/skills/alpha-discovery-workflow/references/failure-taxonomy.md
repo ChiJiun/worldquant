@@ -18,6 +18,8 @@ Use standardized failure labels. Multiple labels are allowed, but choose one dom
 | `self_corr_pending` | Self-correlation is not known yet. | Candidate otherwise promising but self-corr still pending. |
 | `operator_invalid` | Unsupported operator or syntax. | Platform validation/simulation error. |
 | `unit_incompatible` | Fields/operators have incompatible units. | Unit verification failure. |
+| `platform_timeout` | Platform did not return metrics before polling limit. | Simulation timeout after a valid submission. |
+| `platform_auth_error` | Authentication or network access failed. | Login failed or connection denied. |
 | `over_smoothing` | Smoothing lowers turnover but also destroys edge. | Turnover improves while Sharpe/returns fall. |
 | `signal_amplitude_destroyed` | Transform removes useful signal magnitude. | Full `rank()` or hard clipping lowers returns/Fitness. |
 | `hard_filter_destroyed_returns` | Gating/filtering lowers turnover by removing too many profitable observations. | `trade_when` or event filter sharply reduces returns/Fitness. |

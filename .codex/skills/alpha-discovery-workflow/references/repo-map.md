@@ -14,9 +14,7 @@ Use these files for this workspace:
 - `app/quality.py`: pre-simulation expression filters.
 - `config/fields.json`: available fields, wrappers, groups, and decays.
 - `config/templates.json`: vetted GA template families. This may be `{}` until good families are promoted.
-- `.codex/skills/worldquant-hypothesis-scout`: independent research role that creates `outputs/alpha_hypotheses.json`.
-- `.codex/skills/worldquant-alpha-judge`: independent simulation triage role.
-- `.codex/skills/worldquant-template-governor`: independent template promotion and GA governance role.
+- `.codex/skills/worldquant-alpha-researcher`: single main researcher skill with Literature Scout, Hypothesis Builder, Alpha Designer, Result Reflector, and Template Governor modes.
 
 Default outputs:
 

@@ -1,6 +1,6 @@
 # WorldQuant Brain Alpha Workflow
 
-這個 repo 是一套研究優先的 WorldQuant BRAIN alpha workflow。流程把「研究假設」、「模擬評審」、「模板治理」拆成三個獨立 agent，讓每個角色只根據已落地的檔案與資料庫紀錄做判斷，不互相改寫推理。
+這個 repo 是一套研究優先的 WorldQuant BRAIN alpha workflow。流程由一個主研究員 agent 執行，內部拆成多個 mode，讓研究、設計、模擬、反思、記憶更新各自有清楚資料合約。
 
 ## Agent Workflow
 
@@ -13,16 +13,23 @@
 3. Alpha Designer
    把單一假設轉成合法 BRAIN expression，產生 `outputs/candidate_batch.json`。互動流程下一次只輸出一條 alpha。
 
-4. Simulation Runner / Alpha Judge
-   執行 `app alpha-workflow`，模擬候選 alpha，並把結果追加到固定 output 檔案。
+4. Result Reflector
+   讀取 simulation artifacts，比較 latest / parent / family best，分類瓶頸，決定下一個單一行動。
 
-5. Result Reflector
-   比較 latest / parent / family best，分類失敗原因，決定下一個單一實驗或停止。
-
-6. Family Memory / Template Governor
+5. Family Memory / Template Governor
    更新 `family_memory.json`，並決定哪些 alpha family 可以進 template / GA 流程。
 
-各 mode 不共享私下推理，只透過檔案與 SQLite 紀錄交接。
+這不是多個完全獨立 agent，而是一個主研究員的內部工作模式。每個 mode 仍要透過檔案與 SQLite 紀錄交接，確保推理可追蹤、可 debug、可累積。
+
+主研究員每次執行只選一個 mode：
+
+```text
+Step 1. Read memory and latest results
+Step 2. Decide task type
+Step 3. Execute exactly one mode
+Step 4. Write artifact
+Step 5. Update family_memory when needed
+```
 
 ## 專案記憶
 
@@ -235,6 +242,5 @@ Prompt library 在：
 - `literature_scout_prompt.md`
 - `hypothesis_builder_prompt.md`
 - `alpha_designer_prompt.md`
-- `alpha_judge_prompt.md`
 - `result_reflector_prompt.md`
 - `template_governor_prompt.md`

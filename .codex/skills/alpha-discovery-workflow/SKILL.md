@@ -15,11 +15,9 @@ Read `references/artifact-contracts.md` before changing workflow artifacts.
 Read `references/failure-taxonomy.md` before classifying failures.
 Read `references/stop-rules.md` before proposing follow-up experiments.
 Read `.codex/memories/worldquant_brain_research_principles.md` before acting as Hypothesis Scout when the file exists.
-Use `worldquant-hypothesis-scout` for Literature Scout, Hypothesis Builder, and Alpha Designer modes.
-Use `worldquant-alpha-judge` for Simulation Runner / Alpha Judge and Result Reflector modes.
-Use `worldquant-template-governor` for template promotion and GA family governance.
+Use `worldquant-alpha-researcher` as the single main researcher for Literature Scout, Hypothesis Builder, Alpha Designer, Result Reflector, and Family Memory / Template Governor modes.
 
-Agent independence rule: each mode makes its own decision from persisted artifacts, not from another mode's private reasoning. Literature Scout writes source notes, Hypothesis Builder writes hypotheses without formulas, Alpha Designer writes candidates without judging them, Alpha Judge records metrics, Result Reflector decides the next experiment, and Governor promotes only from judged artifacts. If a later mode disagrees, record a separate decision instead of rewriting the prior rationale.
+Mode discipline rule: one main researcher owns the whole loop and must choose exactly one mode per run. Literature Scout writes source notes, Hypothesis Builder writes hypotheses without formulas, Alpha Designer writes candidates without judging them, Result Reflector decides the next experiment from simulation artifacts, and Governor promotes only from family memory / judged artifacts. If a later mode disagrees, record a separate decision instead of rewriting the prior rationale.
 
 Primary tool command:
 
@@ -39,6 +37,14 @@ C:\Users\USER\anaconda3\python.exe -m app search --generations 1
 C:\Users\USER\anaconda3\python.exe -m app mine --cycles 20 --sleep-seconds 5
 C:\Users\USER\anaconda3\python.exe -m app dashboard --limit 10
 ```
+
+## Main Researcher Procedure
+
+1. Read memory and latest results.
+2. Decide task type: literature, hypothesis, formula design, result reflection, or template promotion.
+3. Execute exactly one mode.
+4. Write the mode artifact.
+5. Update `outputs/family_memory.json` when the mode changes family knowledge.
 
 ## Mode Split
 
@@ -76,27 +82,17 @@ Rules:
 
 Prompt: `references/prompt-library/alpha_designer_prompt.md`.
 
-### 4. Simulation Runner / Alpha Judge
+### Simulation Command
 
-Goal: decide whether simulated results are submit-ready, improvement candidates, or rejects.
+After Alpha Designer writes `outputs/candidate_batch.json`, run this command when the user wants to simulate:
 
-Procedure:
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\candidate_batch.json --promote
+```
 
-1. Simulate the scout's candidates with the repo's Brain client or mock client when credentials/network are unavailable.
-2. Inspect `sharpe`, `fitness`, `returns`, `drawdown`, `turnover`, `margin`, `checks_failed`, stage metrics, and behavior similarity.
-3. Assign `triage_decision` and `quality_tier` using `references/quality-rubric.md`.
-4. Decide:
-   - `submit_ready`: already passes WorldQuant submission gates.
-   - `refine_candidate`: not submit-ready, but close enough and economically coherent enough to improve.
-   - `reject`: failed checks, weak economics, duplicate behavior, or too far from submission.
-5. Record standardized failure types from `references/failure-taxonomy.md`.
-6. Run `python -m app alpha-workflow --hypotheses outputs/candidate_batch.json --promote` for the deterministic simulate/judge/report pass.
+### 4. Result Reflector
 
-Prompt: `references/prompt-library/alpha_judge_prompt.md`.
-
-### 5. Result Reflector
-
-Goal: compare the latest result against its parent and decide exactly one next experiment or stop decision.
+Goal: parse latest simulation artifacts, compare the latest result against its parent and family best, and decide exactly one next experiment or stop decision.
 
 Rules:
 
@@ -108,13 +104,13 @@ Rules:
 
 Prompt: `references/prompt-library/result_reflector_prompt.md`.
 
-### 6. Family Memory / Template Governor
+### 5. Family Memory / Template Governor
 
 Goal: update family memory and decide whether a family should enter templates / GA search. Do not invent new alphas.
 
 Prompt: `references/prompt-library/template_governor_prompt.md`.
 
-If the user explicitly requests parallel agents, delegate independent modes as separate agents. Otherwise run all modes locally and keep their persisted outputs separate.
+Run all modes through the main researcher unless the user explicitly asks for parallel agents. Keep persisted outputs separate even though the same researcher owns the loop.
 
 ## Template Promotion
 
