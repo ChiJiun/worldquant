@@ -64,39 +64,6 @@ def test_research_artifacts_record_platform_error(tmp_path):
     assert "operator_invalid" in failed
 
 
-def test_research_artifacts_record_platform_passed_candidate(tmp_path):
-    research_dir = tmp_path / "research"
-    initialize_research_dir(research_dir)
-
-    record_research_artifacts(
-        research_dir,
-        [
-            {
-                "candidate_id": "C_submit",
-                "family": "ensemble",
-                "expression": "zscore(rank(close)) + zscore(rank(volume))",
-                "result_id": "alpha-2",
-                "metrics": {
-                    "sharpe": 1.65,
-                    "fitness": 1.1,
-                    "returns": 0.1972,
-                    "drawdown": 0.1023,
-                    "turnover": 0.4415,
-                    "checks_failed": 0,
-                },
-            }
-        ],
-        [],
-    )
-
-    decisions = (research_dir / "experiment_decisions.jsonl").read_text(encoding="utf-8").splitlines()
-    latest = json.loads(decisions[-1])
-    assert latest["decision"] == "validate_best_candidate"
-    assert latest["dominant_bottleneck"] == "validation_pending"
-    assert "C_submit" in (research_dir / "passed_alphas.csv").read_text(encoding="utf-8")
-    assert not (research_dir / "failed_alphas.csv").exists()
-
-
 def test_research_replaces_mock_best_with_live_result(tmp_path):
     research_dir = tmp_path / "research"
     record_research_artifacts(

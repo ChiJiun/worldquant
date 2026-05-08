@@ -129,19 +129,9 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
         elif current_fitness < best_fitness:
             worsened.append("fitness")
 
-    current_sharpe = _float(metrics.get("sharpe"))
-
     if checks_failed > 0:
         decision = "fix_validation_failure"
         next_action = {"type": "validate_checks", "checks": ["weight_concentration", "sub_universe_sharpe", "self_corr"], "reason": "BRAIN checks failed."}
-    elif current_fitness is not None and current_fitness >= 1.0 and current_sharpe is not None and current_sharpe >= 1.25:
-        decision = "validate_best_candidate"
-        bottleneck = "validation_pending"
-        next_action = {
-            "type": "validate_checks",
-            "checks": ["self_corr", "os_performance"],
-            "reason": "Candidate passed platform hard checks and crossed Sharpe/Fitness submission gates; stop blind tuning.",
-        }
     elif current_fitness is not None and current_turnover is not None and current_fitness > 1.2 and current_turnover < 40:
         decision = "validate_best_candidate"
         bottleneck = "validation_pending"
