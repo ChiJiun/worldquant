@@ -1,0 +1,1 @@
+{"recorded_at":"2026-05-08T00:00:00Z","candidate_id":"A_example_001","family":"api_smoke","expression":"rank(close)","simulation_id":"example-simulation-id","result_id":"example-alpha-id","metrics":{"sharpe":1.23,"fitness":1.01,"turnover":0.25}}

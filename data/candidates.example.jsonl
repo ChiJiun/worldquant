@@ -1,0 +1,1 @@
+{"candidate_id":"A_example_001","family":"api_smoke","expression":"rank(close)","notes":"Example candidate. Copy to data/candidates.jsonl for live work."}

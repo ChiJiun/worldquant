@@ -1,4 +1,0 @@
-interface:
-  display_name: "WorldQuant Alpha Researcher"
-  short_description: "Execute one disciplined alpha research mode"
-  default_prompt: "Use $worldquant-alpha-researcher to choose exactly one research mode, write its artifact, and update family memory."

@@ -1,129 +1,142 @@
-# WorldQuant Brain Alpha Workflow
+# WorldQuant BRAIN API Simulator
 
-這個 repo 是一套研究優先的 WorldQuant BRAIN alpha workflow。流程由一個主研究員 agent 執行，內部拆成多個 mode，讓研究、設計、模擬、反思、記憶更新各自有清楚資料合約。
+這個專案先砍到最小目標：穩定 WorldQuant BRAIN API simulate。
 
-## Agent Workflow
+目前不做 GA、不做 template promotion、不做多 agent workflow。先把登入、送出 alpha、poll、讀結果、落地 artifacts 做穩，再往上加研究流程。
 
-1. Literature Scout
-   查資料並抽取可測市場機制，產生 `outputs/source_notes.json`。不能產生 alpha 公式。
-
-2. Hypothesis Builder
-   把來源與 family memory 轉成可證偽假設，產生 `outputs/alpha_hypotheses.json`。不能產生 final expression。
-
-3. Alpha Designer
-   把單一假設轉成合法 BRAIN expression，產生 `outputs/candidate_batch.json`。互動流程下一次只輸出一條 alpha。
-
-4. Result Reflector
-   讀取 simulation artifacts，比較 latest / parent / family best，分類瓶頸，決定下一個單一行動。
-
-5. Family Memory / Template Governor
-   更新 `family_memory.json`，並決定哪些 alpha family 可以進 template / GA 流程。
-
-這不是多個完全獨立 agent，而是一個主研究員的內部工作模式。每個 mode 仍要透過檔案與 SQLite 紀錄交接，確保推理可追蹤、可 debug、可累積。
-
-主研究員每次執行只選一個 mode：
+## 核心流程
 
 ```text
-Step 1. Read memory and latest results
-Step 2. Decide task type
-Step 3. Execute exactly one mode
-Step 4. Write artifact
-Step 5. Update family_memory when needed
+data/candidates.jsonl
+  -> python -m app simulate
+  -> outputs/runs/<run_id>/
+  -> outputs/simulate_results.jsonl
+  -> outputs/simulate_errors.jsonl
 ```
 
-## 專案記憶
-
-WorldQuant / alpha 設計相關記憶放在專案內：
+## 目錄
 
 ```text
-.codex/memories/worldquant_brain_research_principles.md
+app/
 ```
 
-這份記憶刻意不放在全域 Codex memory，避免本專案的 WorldQuant 假設污染其他專案，也確保 repo 自己帶著完整研究脈絡。
+Python 程式。現在只保留：
 
-## 核心目錄
-
-```text
-.codex/
-```
-
-Codex agent 指令、角色 skill、專案記憶。Python runtime 不會 import 這個目錄。
-
-```text
-config/
-```
-
-可編輯設定：
-
-- `fields.json`: BRAIN fields/operators catalog。
-- `templates.json`: vetted GA template families。
+- `config.py`: 讀 `.env` 與 simulation settings。
+- `api/clients.py`: WorldQuant login / simulate / poll / result client。
+- `simulator.py`: 讀候選、跑 simulate、寫 JSONL artifacts。
+- `cli.py`: CLI entry point。
 
 ```text
 data/
 ```
 
-SQLite runtime 狀態，預設是 `data/worldquant.db`。儲存 candidates、metrics、hypotheses、templates、submittable alphas。
+人工與 LLM 都可以寫入的輸入區。主要檔案：
+
+- `data/candidates.jsonl`: 一行一條 candidate，JSONL 格式。
+
+每行格式：
+
+```json
+{"candidate_id":"A_manual_001","family":"api_smoke","expression":"rank(close)","notes":"manual test"}
+```
 
 ```text
 outputs/
 ```
 
-Agent 交接 artifacts 與報告。約定是每種類型一個固定檔案，跨 workflow run 持續更新：
+程式輸出區。主要檔案：
 
-- `alpha_hypotheses.json`: Scout 當前 hypothesis batch。
-- `source_notes.json`: Literature Scout 的來源與 market mechanism 摘要。
-- `candidate_batch.json`: Alpha Designer 產生的合法 expression batch。
-- `candidate_result.json`: Judge/Reflector 的結構化單候選結果。
-- `alpha_workflow_report.md`: Judge 累積 run report。
-- `promotable_families.json`: 累積可供 Governor 審核的 family。
-- `family_memory.json`: family 層級的有效/無效結論與下一步。
-- `experiment_decisions.json`: Reflector 的決策紀錄。
-- `next_experiment.json`: 互動流程下一個單一實驗。
-- `failure_taxonomy.csv`: 標準化失敗原因。
-- `operator_errors.json`: operator / unit 錯誤紀錄。
-- `run_summary.csv`: 累積 simulation summary。
-- `passed_alphas.csv`: 累積 submit-ready alphas。
-- `failed_alphas.csv`: 累積失敗紀錄。
-- `session_dashboard.md`: 目前 dashboard snapshot。
-- `best_alphas.txt`: 累積 best alpha log。
+- `outputs/runs/<run_id>/input.jsonl`: 該次執行的輸入快照。
+- `outputs/runs/<run_id>/results.jsonl`: 該次成功結果。
+- `outputs/runs/<run_id>/errors.jsonl`: 該次錯誤。
+- `outputs/runs/<run_id>/summary.json`: 該次摘要。
+- `outputs/simulate_results.jsonl`: 跨 run 累積成功結果。
+- `outputs/simulate_errors.jsonl`: 跨 run 累積錯誤。
+
+```text
+config/
+```
+
+保留 BRAIN fields/operators catalog。現在不依賴 template 設定。
 
 ```text
 logs/
 ```
 
-Runtime logs，用於 debug login、simulation、pipeline error。
+程式 log。
 
-```text
-scripts/
-```
+## 設定
 
-PowerShell 自動化輔助腳本。Python app 核心流程不依賴它們。
-
-## 主要命令
-
-同步 fields/operators：
+建立本機 `.env`：
 
 ```powershell
-C:\Users\USER\anaconda3\python.exe -m app catalog-sync --output config\fields.json
+Copy-Item .env.example .env
 ```
 
-執行 hypothesis 到 simulation / triage 的研究 workflow：
+先用 mock 跑通本機流程：
 
-```powershell
-C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\alpha_hypotheses.json --promote
+```env
+WQ_DRY_RUN=true
+WQ_CLIENT_MODE=requests
 ```
 
-查看 template 與可提交 alpha：
+要打 live API 時：
 
-```powershell
-C:\Users\USER\anaconda3\python.exe -m app template-list
-C:\Users\USER\anaconda3\python.exe -m app submittable-list
+```env
+WQ_DRY_RUN=false
+WQ_CLIENT_MODE=requests
+WQ_AUTH_MODE=auto
+WQ_REQUEST_TIMEOUT_SECONDS=60
+WQ_MAX_POLL_ATTEMPTS=120
+WQ_POLL_INTERVAL_SECONDS=5.0
 ```
 
-執行 GA search：
+`WQ_REQUEST_TIMEOUT_SECONDS` 是單次 HTTP request timeout。  
+`WQ_MAX_POLL_ATTEMPTS * WQ_POLL_INTERVAL_SECONDS` 是每條 simulation 最多等待時間。
+
+## 命令
+
+初始化可編輯資料檔：
 
 ```powershell
-C:\Users\USER\anaconda3\python.exe -m app search --generations 1
+C:\Users\USER\anaconda3\python.exe -m app init-data
+```
+
+檢查設定，不印出帳密：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app settings
+```
+
+檢查登入：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app login-check
+```
+
+跑 `data/candidates.jsonl`：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app simulate
+```
+
+只跑一條 expression：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app simulate --expression "rank(close)" --family api_smoke
+```
+
+限制本次最多跑一條：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1
+```
+
+讀單一 alpha / result：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app result <alpha_or_result_id>
 ```
 
 跑測試：
@@ -132,115 +145,23 @@ C:\Users\USER\anaconda3\python.exe -m app search --generations 1
 C:\Users\USER\anaconda3\python.exe -m pytest
 ```
 
-## `pyproject.toml` 的用途
+## 寫入規則
 
-`pyproject.toml` 是 Python 專案設定檔，不是 workflow 資料。它告訴 Python 工具：
+給 LLM 或人工追加候選時，只改 `data/candidates.jsonl`。
 
-- 這個 package 怎麼 build / install；
-- package 名稱與 Python 版本需求；
-- runtime dependencies，例如 `numpy`、`pandas`、`requests`；
-- 哪些 module 屬於這個 project；
-- pytest 預設從哪個目錄找測試。
+規則：
 
-簡單說，它是 tooling metadata，負責 packaging、dependency resolution、editable install、test discovery。
+- 一行一個 JSON object。
+- 必填 `expression`。
+- 建議填 `candidate_id`、`family`、`notes`。
+- 不要把結果手寫進 `outputs/`，那裡由程式產生。
+- 不要把帳密寫進任何 JSONL。
 
-## Artifact Contracts
+## 下一步
 
-詳細 schema 在：
+等 live simulate 穩定後，再加：
 
-```text
-.codex/skills/alpha-discovery-workflow/references/artifact-contracts.md
-```
-
-核心資料流：
-
-```text
-source_notes.json
-  -> alpha_hypotheses.json
-  -> candidate_batch.json
-  -> run_summary.csv / candidate_result.json
-  -> experiment_decisions.json / next_experiment.json
-  -> family_memory.json
-  -> templates.json / GA search
-```
-
-重要規則：
-
-- Literature Scout 只輸出 market mechanism，不輸出公式。
-- Hypothesis Builder 只輸出可測假設，不輸出 final expression。
-- Alpha Designer 才輸出 expression，且互動流程一次只輸出一條。
-- Result Reflector 每次只決定一個 next action。
-
-## Failure Taxonomy
-
-標準 failure labels 在：
-
-```text
-.codex/skills/alpha-discovery-workflow/references/failure-taxonomy.md
-```
-
-常用類型：
-
-- `turnover_too_high`
-- `return_density_too_low`
-- `weight_concentration`
-- `sub_universe_fail`
-- `self_corr_risk`
-- `operator_invalid`
-- `unit_incompatible`
-- `signal_amplitude_destroyed`
-- `over_smoothing`
-- `hard_filter_destroyed_returns`
-- `direction_wrong`
-- `no_directional_edge`
-
-Judge / Reflector 不能只看 Sharpe。BRAIN 類 Fitness 會同時受到 Sharpe、Returns、Turnover 和檢查項影響。
-
-## Promotion Rules
-
-Family 狀態建議：
-
-- `candidate`: 有初步機制，但結果不足。
-- `reserve`: 暫停但不刪除，等待新資料或新 operator。
-- `promotable_family`: 至少兩個 promising variants，且失敗模式已知。
-- `template_ready`: 可參數化進 `templates.json` 或 SQLite template table。
-- `submit_candidate`: 已接近或通過提交檢查，優先做 concentration / sub-universe / self-corr validation。
-- `pruned_family`: 同一瓶頸重複失敗或停止規則觸發。
-
-不要 promote：
-
-- 只靠 cosmetic parameter change 變好；
-- 所有 variants 都卡同一 failure bottleneck；
-- 依賴 unsupported operator；
-- yearly behavior 不穩且沒有修法。
-
-## Stop Rules
-
-停止規則在：
-
-```text
-.codex/skills/alpha-discovery-workflow/references/stop-rules.md
-```
-
-重點：
-
-- 同一 family 連續 5 次沒有 Fitness 提升至少 `0.05`，停止。
-- 如果只是 Sharpe / Returns / Turnover 互相 trade-off，停止。
-- 同一 dominant failure 重複 3 次，停止或換 family。
-- Fitness > 1.2 且 Turnover < 40% 時，不再盲目優化公式，先檢查 weight concentration、sub-universe Sharpe、self-corr。
-
-## Prompt Library
-
-Prompt library 在：
-
-```text
-.codex/skills/alpha-discovery-workflow/references/prompt-library/
-```
-
-主要 prompt：
-
-- `literature_scout_prompt.md`
-- `hypothesis_builder_prompt.md`
-- `alpha_designer_prompt.md`
-- `result_reflector_prompt.md`
-- `template_governor_prompt.md`
+- result classifier
+- failure taxonomy
+- family memory
+- hypothesis/design workflow

@@ -1,189 +1,111 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
-import logging
 from pathlib import Path
-from typing import Iterable, List, Optional
-
-LOGGER = logging.getLogger(__name__)
+from typing import List, Optional
 
 from app.api import RateLimiter, build_client
-from app.catalog import BrainCatalogSync
 from app.config import Settings
-from app.dedupe import DedupeService
 from app.logging_utils import configure_logging
-from app.pipeline import AlphaPipeline
-from app.scoring import ResultScorer
-from app.search import GeneticSearchEngine, MCTSSearchEngine
-from app.storage import StorageRepository
-from app.templates import TemplateEngine
-from app.workflow import AlphaDiscoveryWorkflow
-
-
-def build_pipeline(settings: Settings, engine_name: str = "ga") -> AlphaPipeline:
-    settings.ensure_directories()
-    configure_logging(settings.log_dir)
-    storage = StorageRepository(settings.storage_path, settings.output_dir)
-    template_engine = TemplateEngine(settings.load_fields(), settings.load_template_specs())
-    if engine_name == "mcts":
-        search_engine = MCTSSearchEngine(template_engine)
-    else:
-        search_engine = GeneticSearchEngine(
-            template_engine,
-            population_size=settings.population_size,
-            elite_count=settings.elite_count,
-            immigrant_ratio=settings.immigrant_ratio,
-            mutation_rate=settings.mutation_rate,
-            crossover_rate=settings.crossover_rate,
-        )
-    dedupe = DedupeService(storage.iter_fingerprints())
-    scorer = ResultScorer()
-    client = build_client(settings, RateLimiter(settings.rate_limit_seconds))
-    return AlphaPipeline(settings, template_engine, search_engine, storage, client, scorer, dedupe)
+from app.models import AlphaCandidate
+from app.simulator import SimulateRunner, render_metrics
 
 
 def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="WorldQuant Brain alpha automation")
+    parser = argparse.ArgumentParser(description="Minimal WorldQuant BRAIN API simulator")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    generate = subparsers.add_parser("generate", help="Generate candidate formulas only")
-    generate.add_argument("--count", type=int, default=10)
+    subparsers.add_parser("init-data", help="Create editable data/output folders and sample candidate file")
+    subparsers.add_parser("login-check", help="Check WorldQuant BRAIN login")
 
-    search = subparsers.add_parser("search", help="Run evolutionary search and simulate candidates")
-    search.add_argument("--engine", choices=["ga", "mcts"], default="ga")
-    search.add_argument("--generations", type=int, default=None)
+    simulate = subparsers.add_parser("simulate", help="Submit candidates and write JSONL results")
+    simulate.add_argument("--input", default=None, help="JSONL or JSON candidate file. Defaults to WQ_CANDIDATE_FILE")
+    simulate.add_argument("--limit", type=int, default=None, help="Optional max number of candidates to submit")
+    simulate.add_argument("--expression", default=None, help="Submit one expression without editing the input file")
+    simulate.add_argument("--family", default="manual", help="Family name for --expression")
+    simulate.add_argument("--candidate-id", default="", help="Candidate id for --expression")
 
-    run = subparsers.add_parser("run", help="Alias for search")
-    run.add_argument("--engine", choices=["ga", "mcts"], default="ga")
-    run.add_argument("--generations", type=int, default=None)
+    result = subparsers.add_parser("result", help="Fetch one result/alpha by id and print metrics JSON")
+    result.add_argument("result_id")
 
-    mine = subparsers.add_parser("mine", help="Continuously mine alpha candidates across cycles")
-    mine.add_argument("--engine", choices=["ga", "mcts"], default="ga")
-    mine.add_argument("--cycles", type=int, default=None)
-    mine.add_argument("--sleep-seconds", type=float, default=None)
-    resume = subparsers.add_parser("resume-mine", help="Resume mining from the latest checkpoint")
-    resume.add_argument("--engine", choices=["ga", "mcts"], default="ga")
-    resume.add_argument("--sleep-seconds", type=float, default=None)
-
-    subparsers.add_parser("review", help="Print best alphas from storage")
-    subparsers.add_parser("export-best", help="Export best alphas to stdout")
-    subparsers.add_parser("template-list", help="Print manually reviewable alpha template families from storage")
-    subparsers.add_parser("submittable-list", help="Print alphas that passed submission gates from storage")
-    template_add = subparsers.add_parser("template-add", help="Manually add a seed expression to the template DB")
-    template_add.add_argument("--family", required=True)
-    template_add.add_argument("--expression", required=True)
-    template_add.add_argument("--rationale", default="")
-    template_add.add_argument("--hypothesis-id", default="manual")
-    subparsers.add_parser("retry", help="Retry failed candidates")
-    subparsers.add_parser("login-check", help="Check WorldQuant Brain login only")
-    session_report = subparsers.add_parser("session-report", help="Show recent mining sessions")
-    session_report.add_argument("--limit", type=int, default=10)
-    dashboard = subparsers.add_parser("dashboard", help="Write a markdown session dashboard")
-    dashboard.add_argument("--limit", type=int, default=10)
-
-    full_workflow = subparsers.add_parser("full-workflow", help="Run a complete cycle: Sync -> Mine -> Dashboard")
-    full_workflow.add_argument("--cycles", type=int, default=10)
-    full_workflow.add_argument("--engine", choices=["ga", "mcts"], default="ga")
-
-    catalog_sync = subparsers.add_parser("catalog-sync", help="Fetch WorldQuant BRAIN data fields/operators into config/fields.json")
-    catalog_sync.add_argument("--output", default=None, help="Output catalog path, defaults to WQ_FIELDS_CONFIG")
-    catalog_sync.add_argument("--limit", type=int, default=50)
-    catalog_sync.add_argument("--no-operators", action="store_true")
-    for command_name in ("workflow", "alpha-workflow"):
-        workflow = subparsers.add_parser(command_name, help="Run agent-discovered hypotheses through simulate, quality tiering, and reporting")
-        workflow.add_argument("--hypotheses", required=True, help="Path to JSON produced by the hypothesis scout")
-        workflow.add_argument("--promote", action="store_true", help="Append promotable families to outputs/promotable_families.json")
+    subparsers.add_parser("settings", help="Print non-secret effective settings")
     return parser
-
-
-def render_rows(rows: Iterable[object]) -> None:
-    for row in rows:
-        print(dict(row))
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = make_parser()
     args = parser.parse_args(argv)
     settings = Settings.load(Path.cwd())
-    if args.command == "catalog-sync":
-        path = Path(args.output) if args.output else settings.fields_config
-        sync = BrainCatalogSync(settings, path, limit=args.limit)
-        print(sync.run(include_operators=not args.no_operators))
+    settings.ensure_directories()
+    configure_logging(settings.log_dir)
+    client = build_client(settings, RateLimiter(settings.rate_limit_seconds))
+
+    if args.command == "init-data":
+        _init_data(settings)
+        print(settings.candidate_file)
         return 0
-    if args.command in {"workflow", "alpha-workflow"}:
-        runner = AlphaDiscoveryWorkflow(settings)
-        try:
-            path = runner.run(Path(args.hypotheses), promote=args.promote)
-            print(path)
-        finally:
-            runner.close()
+
+    if args.command == "settings":
+        _print_settings(settings)
         return 0
-    pipeline = build_pipeline(settings, getattr(args, "engine", "ga"))
-    try:
-        if args.command == "generate":
-            generated = pipeline.generate_only(args.count)
-            for candidate in generated:
-                print(candidate.expression)
-            return 0
-        if args.command in {"search", "run"}:
-            pipeline.run_search(args.generations)
-            return 0
-        if args.command == "mine":
-            pipeline.run_mining_session(args.cycles, args.sleep_seconds)
-            return 0
-        if args.command == "resume-mine":
-            pipeline.resume_mining_session(args.sleep_seconds)
-            return 0
-        if args.command == "retry":
-            pipeline.retry_failed()
-            return 0
-        if args.command in {"review", "export-best"}:
-            render_rows(pipeline.storage.list_best())
-            return 0
-        if args.command == "template-list":
-            render_rows(pipeline.storage.list_alpha_templates())
-            return 0
-        if args.command == "submittable-list":
-            render_rows(pipeline.storage.list_submittable_alphas())
-            return 0
-        if args.command == "template-add":
-            pipeline.storage.save_alpha_template(
+
+    if args.command == "login-check":
+        client.login()
+        mode = getattr(client, "last_login_mode", settings.client_mode)
+        print(f"login-ok auth_mode={mode}")
+        return 0
+
+    if args.command == "simulate":
+        if args.expression:
+            candidate = AlphaCandidate(
+                candidate_id=args.candidate_id,
                 family=args.family,
-                hypothesis_id=args.hypothesis_id,
-                seed_expression=args.expression,
-                rationale=args.rationale,
-                source="manual",
-                status="candidate",
+                expression=args.expression,
             )
-            return 0
-        if args.command == "session-report":
-            render_rows(pipeline.storage.list_recent_sessions(args.limit))
-            return 0
-        if args.command == "dashboard":
-            path = pipeline.storage.generate_session_dashboard(args.limit)
-            print(path)
-            return 0
-        if args.command == "full-workflow":
-            # 1. Sync Catalog
-            path = settings.fields_config
-            sync = BrainCatalogSync(settings, path, limit=20)
-            LOGGER.info("Starting Catalog Sync...")
-            sync.run(include_operators=True)
-            
-            # 2. Run Mining
-            LOGGER.info("Starting Mining Sessions (Cycles: %s)...", args.cycles)
-            pipeline.run_mining_session(args.cycles)
-            
-            # 3. Dashboard
-            path = pipeline.storage.generate_session_dashboard(10)
-            print(f"Workflow Complete. Dashboard: {path}")
-            return 0
-        if args.command == "login-check":
-            pipeline.client.login()
-            mode = getattr(pipeline.client, "last_login_mode", None) or settings.client_mode
-            print(f"login-ok auth_mode={mode}")
-            return 0
-        parser.error(f"Unknown command: {args.command}")
-        return 2
-    finally:
-        pipeline.storage.close()
+            temp_input = settings.output_dir / "manual_candidate.jsonl"
+            temp_input.write_text(
+                f'{{"candidate_id": "{candidate.candidate_id}", "family": "{candidate.family}", "expression": "{candidate.expression}"}}\n',
+                encoding="utf-8",
+            )
+            input_path = temp_input
+        else:
+            input_path = Path(args.input) if args.input else settings.candidate_file
+        run_dir = SimulateRunner(settings, client).run(input_path, limit=args.limit)
+        print(run_dir)
+        return 0
+
+    if args.command == "result":
+        metrics = client.fetch_result(args.result_id)
+        print(render_metrics(metrics))
+        return 0
+
+    parser.error(f"Unknown command: {args.command}")
+    return 2
+
+
+def _init_data(settings: Settings) -> None:
+    if not settings.candidate_file.exists():
+        settings.candidate_file.write_text(
+            '{"candidate_id":"A_manual_001","family":"api_smoke","expression":"rank(close)","notes":"Replace with one expression per line."}\n',
+            encoding="utf-8",
+        )
+
+
+def _print_settings(settings: Settings) -> None:
+    rows = {
+        "api_base_url": settings.api_base_url,
+        "auth_mode": settings.auth_mode,
+        "client_mode": settings.client_mode,
+        "dry_run": settings.dry_run,
+        "request_timeout_seconds": settings.request_timeout_seconds,
+        "rate_limit_seconds": settings.rate_limit_seconds,
+        "max_poll_attempts": settings.max_poll_attempts,
+        "poll_interval_seconds": settings.poll_interval_seconds,
+        "candidate_file": str(settings.candidate_file),
+        "output_dir": str(settings.output_dir),
+        "has_username": bool(settings.username),
+        "has_password": bool(settings.password),
+        "simulation_settings": settings.simulation_settings_payload(),
+    }
+    for key, value in rows.items():
+        print(f"{key}={value}")

@@ -8,8 +8,16 @@ __pycache__/
 .venv/
 *.egg-info/
 
-data/
-outputs/
+data/*
+!data/README.md
+!data/candidates.example.jsonl
+
+outputs/*
+!outputs/README.md
+!outputs/simulate_results.example.jsonl
+
 outputs_*/
-logs/
+
+logs/*
+!logs/README.md
 logs_old_*/

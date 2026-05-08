@@ -10,7 +10,7 @@
   "wrappers": ["rank", "zscore", "ts_rank", "ts_decay_linear"],
   "operator_ids": ["ts_rank", "ts_mean", "ts_std_dev", "ts_delta", "ts_min", "ts_max", "group_neutralize", "rank", "zscore", "quantile", "abs", "log", "sign", "sub", "add", "mul", "div"],
   "metadata": {
-    "source": "Full GA configuration with Learn/Data expressions and common operators",
+    "source": "Minimal local BRAIN field/operator catalog for API simulation smoke tests",
     "last_sync": "2026-05-08"
   }
 }

@@ -3,13 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "worldquant-alpha-manager"
+name = "worldquant-api-simulator"
 version = "0.1.0"
-description = "WorldQuant Brain alpha mining and management automation system"
+description = "Minimal WorldQuant BRAIN API simulation runner"
 requires-python = ">=3.8"
 dependencies = [
-  "numpy>=1.24",
-  "pandas>=2.0",
   "requests>=2.31",
 ]
 
