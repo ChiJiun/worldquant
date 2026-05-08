@@ -61,3 +61,40 @@ Do not copy formula lists blindly. Treat example formulas as templates for mecha
 - `reject`: failed checks, weak economic story, extreme turnover, unstable stages, high similarity, or too far from submission gates.
 
 Quality tiers apply only after submission gates are passed.
+
+## Empirical Research Principles From Interactive Alpha Search
+
+1. Do not optimize alpha by random formula mutation. Work by alpha family and change one dimension at a time.
+
+2. Intraday signed pressure reversal is real but turnover-heavy. Useful proxies:
+   - `(close - open) / (high - low + 0.01)`
+   - `(2 * close - high - low) / (high - low + 0.01)`
+   - `(vwap - close) / (high - low + 0.01)`
+
+3. Hard `trade_when` filters often reduce turnover but destroy return density. Do not use hard gating unless returns remain stable.
+
+4. Over-smoothing reduces turnover but usually also reduces Sharpe / Returns.
+
+5. Pure range expansion, overnight gap reversal, and absolute movement efficiency were weak in current tests.
+
+6. Long-horizon return z-score reversal is currently the strongest family. Best current candidate:
+
+```text
+signed_power(
+    -ts_decay_linear(((returns - ts_mean(returns, 120)) / (1 + ts_std_dev(returns, 120))), 90),
+    0.9
+)
+```
+
+Current reference metrics: Sharpe 1.18, Turnover 10.64%, Fitness 1.37, Returns 16.77%, Drawdown 12.20%.
+
+7. Full `rank()` destroys useful z-score amplitude in this family. Avoid `rank()` unless concentration cannot be solved otherwise.
+
+8. `signed_power` compression is better than `rank()` for controlling extreme exposure. Useful power range: 0.85-0.95.
+
+9. Once Fitness > 1.2 and Turnover < 40%, stop blind optimization. Prioritize:
+   - weight concentration;
+   - sub-universe Sharpe;
+   - self-correlation.
+
+10. Use 101 Formulaic Alphas as structural evidence, not a copy source. Key lessons: short holding periods, low average pairwise correlation, and returns-volatility relationships matter; formula copying does not.

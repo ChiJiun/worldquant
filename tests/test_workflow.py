@@ -143,3 +143,36 @@ def test_workflow_outputs_use_stable_cumulative_files(settings):
     promotable = json.loads((settings.output_dir / "promotable_families.json").read_text(encoding="utf-8"))
     assert len(promotable) == 2
     assert all(row["family"] == "test_family" for row in promotable)
+
+
+def test_workflow_accepts_candidate_batch_contract(settings):
+    settings.ensure_directories()
+    candidates = settings.output_dir / "candidate_batch.json"
+    candidates.write_text(
+        json.dumps(
+            {
+                "candidate_batch_id": "test_batch",
+                "candidates": [
+                    {
+                        "candidate_id": "A_test_001",
+                        "hypothesis_id": "H_test_001",
+                        "family": "candidate_contract_family",
+                        "expression": "rank(close)",
+                        "changed_dimension": "base_version",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runner = AlphaDiscoveryWorkflow(settings)
+    try:
+        report = runner.run(candidates, promote=True)
+        templates = runner.storage.list_alpha_templates()
+    finally:
+        runner.close()
+
+    assert report.exists()
+    assert "candidate_contract_family" in report.read_text(encoding="utf-8")
+    assert templates[0]["hypothesis_id"] == "H_test_001"

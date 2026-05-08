@@ -52,6 +52,19 @@ class AlphaDiscoveryWorkflow:
 
     def _load_alphas(self, payload: Dict[str, Any]) -> List[WorkflowAlpha]:
         loaded: List[WorkflowAlpha] = []
+        for item in payload.get("candidates", []):
+            expression = str(item.get("expression") or item.get("code") or "").strip()
+            if not expression:
+                continue
+            hypothesis_id = str(item.get("hypothesis_id") or item.get("parent_alpha_id") or item.get("candidate_id") or f"candidate_{len(loaded) + 1}")
+            loaded.append(
+                WorkflowAlpha(
+                    hypothesis_id=hypothesis_id,
+                    expression=expression,
+                    family=str(item.get("family") or hypothesis_id),
+                    rationale=str(item.get("rationale") or item.get("expected_effect") or ""),
+                )
+            )
         for hypothesis in payload.get("hypotheses", []):
             hypothesis_id = str(hypothesis.get("id") or hypothesis.get("name") or f"hypothesis_{len(loaded) + 1}")
             family = str(hypothesis.get("family") or hypothesis_id)
@@ -69,7 +82,7 @@ class AlphaDiscoveryWorkflow:
                     )
                 )
         if not loaded:
-            raise ValueError("No alpha expressions found. Expected hypotheses[].alphas[].expression in the input JSON.")
+            raise ValueError("No alpha expressions found. Expected candidates[].expression or hypotheses[].alphas[].expression in the input JSON.")
         return loaded
 
     def _simulate_alpha(self, alpha: WorkflowAlpha) -> SimulationRecord:

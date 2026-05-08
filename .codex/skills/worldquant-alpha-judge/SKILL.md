@@ -1,30 +1,34 @@
 ---
 name: worldquant-alpha-judge
-description: Judge WorldQuant BRAIN alpha simulation results. Use when Codex needs to run app alpha-workflow, inspect Sharpe/Fitness/turnover/checks/behavior similarity, classify submit_ready/refine_candidate/reject, assign quality tiers, or propose mechanism-preserving refinements after simulations.
+description: Judge and reflect on WorldQuant BRAIN alpha simulation results. Use when Codex needs to run app alpha-workflow, parse Sharpe/Fitness/turnover/checks/yearly metrics, classify standardized failure types, update experiment decisions, or choose the next single experiment without promoting templates.
 ---
 
 # WorldQuant Alpha Judge
 
-Act as the simulation and triage agent. Do not invent new hypotheses unless refining an existing one.
+Act as the simulation, triage, and reflection agent. Keep Alpha Judge and Result Reflector modes separate.
 
 ## Independence Boundary
 
-Judge from the hypothesis JSON, simulation metrics, and generated reports only. Do not rewrite Scout rationale to fit the result. Do not promote templates directly; write triage/refinement decisions and let the Governor decide promotion.
+Judge from candidate batches, simulation metrics, and generated reports only. Do not rewrite Scout/Designer rationale to fit the result. Do not promote templates directly; write triage/reflection decisions and let the Governor decide promotion.
 
 ## Required Context
 
 Read these before judging:
 
 - `../alpha-discovery-workflow/references/quality-rubric.md`
+- `../alpha-discovery-workflow/references/failure-taxonomy.md`
+- `../alpha-discovery-workflow/references/stop-rules.md`
+- `../alpha-discovery-workflow/references/prompt-library/alpha_judge_prompt.md`
+- `../alpha-discovery-workflow/references/prompt-library/result_reflector_prompt.md`
 - `.codex/memories/worldquant_brain_research_principles.md`
 - generated report: `outputs/alpha_workflow_report.md`
 
 ## Workflow
 
-1. Run the deterministic workflow when a hypothesis JSON exists:
+1. Run the deterministic workflow when `outputs/candidate_batch.json` exists:
 
 ```powershell
-C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\alpha_hypotheses.json --promote
+C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\candidate_batch.json --promote
 ```
 
 2. Inspect `sharpe`, `fitness`, `returns`, `drawdown`, `turnover`, `margin`, `checks_failed`, stage metrics, and behavior similarity.
@@ -33,7 +37,20 @@ C:\Users\USER\anaconda3\python.exe -m app alpha-workflow --hypotheses outputs\al
    - `refine_candidate`: coherent and close enough to improve.
    - `reject`: weak, failed, duplicate-like, unstable, or economically incoherent.
 4. Use high/medium/low quality only after submission gates pass.
-5. For refinement, preserve the mechanism and change one dimension at a time.
+5. Append standardized failure labels to `outputs/failure_taxonomy.csv` when evidence is available.
+
+## Result Reflector Mode
+
+Goal: decide the next single experiment or stop decision.
+
+Rules:
+
+- Compare latest result against its parent, not only absolute thresholds.
+- Identify the dominant bottleneck.
+- Do not suggest cosmetic parameter changes.
+- If a family shows diminishing returns, stop it.
+- If Fitness > 1.2 and Turnover < 40%, prioritize weight concentration, sub-universe Sharpe, and self-correlation checks before more formula changes.
+- Write `outputs/candidate_result.json`, `outputs/experiment_decisions.json`, and `outputs/next_experiment.json`.
 
 ## Refinement Moves
 
