@@ -1,8 +1,11 @@
 ﻿from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Iterable, List, Optional
+
+LOGGER = logging.getLogger(__name__)
 
 from app.api import RateLimiter, build_client
 from app.catalog import BrainCatalogSync
@@ -77,6 +80,11 @@ def make_parser() -> argparse.ArgumentParser:
     session_report.add_argument("--limit", type=int, default=10)
     dashboard = subparsers.add_parser("dashboard", help="Write a markdown session dashboard")
     dashboard.add_argument("--limit", type=int, default=10)
+
+    full_workflow = subparsers.add_parser("full-workflow", help="Run a complete cycle: Sync -> Mine -> Dashboard")
+    full_workflow.add_argument("--cycles", type=int, default=10)
+    full_workflow.add_argument("--engine", choices=["ga", "mcts"], default="ga")
+
     catalog_sync = subparsers.add_parser("catalog-sync", help="Fetch WorldQuant BRAIN data fields/operators into config/fields.json")
     catalog_sync.add_argument("--output", default=None, help="Output catalog path, defaults to WQ_FIELDS_CONFIG")
     catalog_sync.add_argument("--limit", type=int, default=50)
@@ -84,7 +92,7 @@ def make_parser() -> argparse.ArgumentParser:
     for command_name in ("workflow", "alpha-workflow"):
         workflow = subparsers.add_parser(command_name, help="Run agent-discovered hypotheses through simulate, quality tiering, and reporting")
         workflow.add_argument("--hypotheses", required=True, help="Path to JSON produced by the hypothesis scout")
-        workflow.add_argument("--promote", action="store_true", help="Write high-tier families to outputs/promotable_families.json")
+        workflow.add_argument("--promote", action="store_true", help="Append promotable families to outputs/promotable_families.json")
     return parser
 
 
@@ -154,6 +162,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.command == "dashboard":
             path = pipeline.storage.generate_session_dashboard(args.limit)
             print(path)
+            return 0
+        if args.command == "full-workflow":
+            # 1. Sync Catalog
+            path = settings.fields_config
+            sync = BrainCatalogSync(settings, path, limit=20)
+            LOGGER.info("Starting Catalog Sync...")
+            sync.run(include_operators=True)
+            
+            # 2. Run Mining
+            LOGGER.info("Starting Mining Sessions (Cycles: %s)...", args.cycles)
+            pipeline.run_mining_session(args.cycles)
+            
+            # 3. Dashboard
+            path = pipeline.storage.generate_session_dashboard(10)
+            print(f"Workflow Complete. Dashboard: {path}")
             return 0
         if args.command == "login-check":
             pipeline.client.login()

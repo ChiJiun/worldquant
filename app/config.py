@@ -15,7 +15,7 @@ def load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip())
+        os.environ[key.strip().lstrip("\ufeff")] = value.strip()
 
 
 def as_bool(value: Optional[str], default: bool = False) -> bool:

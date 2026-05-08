@@ -1,9 +1,16 @@
 {
   "price_fields": ["close", "open", "high", "low", "vwap", "returns"],
-  "volume_fields": ["volume", "adv20", "adv60"],
-  "fundamental_fields": ["eps", "operating_margin", "sales", "book_value", "cashflow"],
+  "volume_fields": ["volume", "adv20", "adv60", "adv5"],
+  "fundamental_fields": ["assets", "ebitda", "eps", "sales", "cashflow", "book_value", "operating_margin", "debt", "pretax_income", "enterprise_value", "equity"],
+  "sentiment_fields": ["sentiment_score", "buzz", "sentiment_daily_avg", "relevance"],
+  "analyst_fields": ["analyst_rating", "target_price", "eps_estimate", "surprise"],
   "group_fields": ["sector", "industry", "subindustry"],
-  "windows": [5, 10, 20, 40, 60, 120],
-  "decays": [3, 5, 10],
-  "wrappers": ["rank", "zscore", "ts_rank", "ts_decay_linear"]
+  "windows": [5, 10, 20, 40, 60, 120, 252],
+  "decays": [3, 5, 10, 20],
+  "wrappers": ["rank", "zscore", "ts_rank", "ts_decay_linear"],
+  "operator_ids": ["ts_rank", "ts_mean", "ts_std_dev", "ts_delta", "ts_min", "ts_max", "group_neutralize", "rank", "zscore", "quantile", "abs", "log", "sign", "sub", "add", "mul", "div"],
+  "metadata": {
+    "source": "Full GA configuration with Learn/Data expressions and common operators",
+    "last_sync": "2026-05-08"
+  }
 }

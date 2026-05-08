@@ -1,1 +1,54 @@
-{}
+{
+  "mean_reversion": {
+    "fields": ["close", "vwap", "open", "returns"],
+    "windows": [5, 10, 20, 40, 60]
+  },
+  "momentum": {
+    "fields": ["close", "returns", "vwap", "eps", "sales", "sentiment_score", "buzz"],
+    "windows": [10, 20, 60, 120, 252]
+  },
+  "price_volume_divergence": {
+    "fields": ["close", "returns", "volume", "adv20"],
+    "windows": [5, 10, 20, 60]
+  },
+  "fundamental_cross": {
+    "fields": ["ebitda", "sales", "cashflow", "book_value", "assets", "eps_estimate", "target_price"],
+    "windows": [60, 120, 252]
+  },
+  "volatility_reversion": {
+    "fields": ["returns", "close", "vwap"],
+    "windows": [5, 10, 20, 60]
+  },
+  "breakout": {
+    "fields": ["close", "high", "low", "vwap"],
+    "windows": [20, 40, 60, 120]
+  },
+  "quality_value": {
+    "fields": ["ebitda", "enterprise_value", "book_value", "assets", "sales"],
+    "windows": [120, 252]
+  },
+  "acceleration": {
+    "fields": ["returns", "close", "eps", "sales", "sentiment_score"],
+    "windows": [5, 10, 20, 60]
+  },
+  "range_reversion": {
+    "fields": ["close", "vwap", "high", "low"],
+    "windows": [5, 10, 20, 60]
+  },
+  "quality_efficiency": {
+    "fields": ["ebitda", "assets", "sales", "operating_margin"],
+    "windows": [60, 120, 252]
+  },
+  "volume_confirmed_breakout": {
+    "fields": ["close", "volume", "adv20", "returns"],
+    "windows": [10, 20, 60]
+  },
+  "liquidity_reversal": {
+    "fields": ["close", "volume", "adv20", "adv60"],
+    "windows": [5, 10, 20, 60]
+  },
+  "fundamental_momentum_spread": {
+    "fields": ["ebitda", "sales", "close", "returns", "sentiment_score"],
+    "windows": [20, 60, 120, 252]
+  }
+}
