@@ -37,6 +37,7 @@ def settings(tmp_path: Path) -> Settings:
         visualization=False,
         candidate_file=tmp_path / "data" / "candidates.jsonl",
         output_dir=tmp_path / "outputs",
+        research_dir=tmp_path / "research",
         log_dir=tmp_path / "logs",
         fields_config=Path("config/fields.json"),
     )

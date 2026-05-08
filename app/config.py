@@ -54,6 +54,7 @@ class Settings:
     visualization: bool
     candidate_file: Path
     output_dir: Path
+    research_dir: Path
     log_dir: Path
     fields_config: Path
 
@@ -91,6 +92,7 @@ class Settings:
             visualization=as_bool(os.getenv("WQ_VISUALIZATION", "false"), default=False),
             candidate_file=Path(os.getenv("WQ_CANDIDATE_FILE", "data/candidates.jsonl")),
             output_dir=Path(os.getenv("WQ_OUTPUT_DIR", "outputs")),
+            research_dir=Path(os.getenv("WQ_RESEARCH_DIR", "research")),
             log_dir=Path(os.getenv("WQ_LOG_DIR", "logs")),
             fields_config=Path(os.getenv("WQ_FIELDS_CONFIG", "config/fields.json")),
         )
@@ -99,6 +101,7 @@ class Settings:
         self.candidate_file.parent.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.output_dir / "runs").mkdir(parents=True, exist_ok=True)
+        self.research_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def simulation_settings_payload(self) -> dict:

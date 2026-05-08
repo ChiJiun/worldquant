@@ -29,3 +29,28 @@ def test_simulate_runner_writes_run_artifacts(settings):
     assert summary["succeeded"] == 1
     assert (run_dir / "results.jsonl").exists()
     assert (settings.output_dir / "simulate_results.jsonl").exists()
+    assert (settings.research_dir / "family_memory.json").exists()
+    assert (settings.research_dir / "experiment_decisions.jsonl").exists()
+
+
+def test_simulate_runner_can_overwrite_current_run(settings):
+    settings.ensure_directories()
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A1","family":"manual","expression":"rank(close)"}\n',
+        encoding="utf-8",
+    )
+    runner = SimulateRunner(settings, MockBrainClient(RateLimiter(0.0)))
+    run_dir = runner.run(settings.candidate_file, archive_run=False)
+    marker = run_dir / "old.txt"
+    marker.write_text("kept", encoding="utf-8")
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A2","family":"manual","expression":"rank(open)"}\n',
+        encoding="utf-8",
+    )
+
+    second_run_dir = runner.run(settings.candidate_file, archive_run=False)
+
+    assert run_dir == settings.output_dir / "current_run"
+    assert second_run_dir == run_dir
+    assert (second_run_dir / "results.jsonl").read_text(encoding="utf-8").count("\n") == 1
+    assert marker.exists()

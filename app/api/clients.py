@@ -161,7 +161,7 @@ class RequestsBrainClient(BrainClient):
 
     def _metrics_from_alpha(self, result_id: str, data: Dict[str, Any]) -> SimulationMetrics:
         metrics = data.get("is") or data.get("train") or data.get("test") or data
-        checks = data.get("checks", [])
+        checks = data.get("checks") or metrics.get("checks") or []
         failed_checks = [
             check for check in checks
             if isinstance(check, dict) and str(check.get("result", "")).upper() == "FAIL"

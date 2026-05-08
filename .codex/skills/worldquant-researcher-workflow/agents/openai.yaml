@@ -1,0 +1,4 @@
+interface:
+  display_name: "WorldQuant Researcher Workflow"
+  short_description: "Disciplined BRAIN alpha research loop"
+  default_prompt: "Use $worldquant-researcher-workflow to read research memory, design one alpha experiment, run simulation, and reflect on results."

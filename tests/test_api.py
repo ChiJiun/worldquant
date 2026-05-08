@@ -68,3 +68,23 @@ def test_requests_client_fetch_result_parses_alpha_metrics(settings):
     assert metrics.alpha_id == "alpha-1"
     assert metrics.sharpe == 1.2
     assert metrics.checks_failed == 1
+
+
+def test_requests_client_fetch_result_parses_nested_is_checks(settings):
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    client.logged_in = True
+    alpha_response = Mock(status_code=200, content=b"{}")
+    alpha_response.json.return_value = {
+        "id": "alpha-1",
+        "is": {
+            "sharpe": 0.94,
+            "fitness": 0.64,
+            "checks": [{"name": "LOW_SHARPE", "result": "FAIL"}],
+        },
+    }
+    client.session.get = Mock(return_value=alpha_response)
+
+    metrics = client.fetch_result("alpha-1")
+
+    assert metrics.sharpe == 0.94
+    assert metrics.checks_failed == 1

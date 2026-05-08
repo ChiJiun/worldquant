@@ -10,6 +10,7 @@ import time
 from app.api import BrainClient
 from app.config import Settings
 from app.models import AlphaCandidate, SimulationMetrics, utc_now_iso
+from app.research import record_research_artifacts
 
 
 TERMINAL_SUCCESS = {"complete", "completed", "done"}
@@ -66,16 +67,21 @@ class SimulateRunner:
         self.client = client
         self.settings.ensure_directories()
 
-    def run(self, input_path: Path, *, limit: Optional[int] = None) -> Path:
+    def run(self, input_path: Path, *, limit: Optional[int] = None, archive_run: bool = True) -> Path:
         candidates = read_candidates(input_path)
         if limit is not None:
             candidates = candidates[:limit]
         if not candidates:
             raise ValueError(f"No candidates found in {input_path}")
 
-        run_id = utc_now_iso().replace(":", "").replace("-", "").replace("Z", "")
-        run_dir = self.settings.output_dir / "runs" / run_id
+        run_id = utc_now_iso().replace(":", "").replace("-", "").replace("Z", "") if archive_run else "current_run"
+        run_dir = self.settings.output_dir / "runs" / run_id if archive_run else self.settings.output_dir / "current_run"
         run_dir.mkdir(parents=True, exist_ok=True)
+        if not archive_run:
+            for name in ("input.jsonl", "input.json", "results.jsonl", "errors.jsonl", "summary.json"):
+                target = run_dir / name
+                if target.exists():
+                    target.unlink()
         shutil.copyfile(input_path, run_dir / f"input{input_path.suffix or '.jsonl'}")
 
         results: List[Dict[str, Any]] = []
@@ -109,6 +115,7 @@ class SimulateRunner:
             "created_at": utc_now_iso(),
         }
         (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        record_research_artifacts(self.settings.research_dir, results, errors)
         return run_dir
 
     def _run_one(self, candidate: AlphaCandidate) -> Dict[str, Any]:
@@ -125,6 +132,7 @@ class SimulateRunner:
             "result_id": result_id,
             "terminal_status": terminal,
             "metrics": metrics.as_dict(),
+            "metadata": candidate.metadata,
         }
 
     def _wait_for_completion(self, simulation_id: str) -> Dict[str, Any]:

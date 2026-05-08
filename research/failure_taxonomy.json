@@ -1,0 +1,21 @@
+[
+  "turnover_too_high",
+  "returns_too_low",
+  "sharpe_too_low",
+  "drawdown_too_high",
+  "weight_concentration",
+  "sub_universe_fail",
+  "self_corr_fail",
+  "signal_amplitude_destroyed",
+  "over_smoothing",
+  "hard_filter_destroyed_returns",
+  "direction_wrong",
+  "operator_invalid",
+  "unit_incompatible",
+  "platform_timeout",
+  "platform_auth_error",
+  "platform_error",
+  "validation_failed",
+  "validation_pending",
+  "no_dominant_bottleneck"
+]
