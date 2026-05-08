@@ -1,0 +1,4 @@
+interface:
+  display_name: "WorldQuant Hypothesis Scout"
+  short_description: "Research mechanisms and draft BRAIN alpha candidates"
+  default_prompt: "Use $worldquant-hypothesis-scout to research a market mechanism and write outputs/alpha_hypotheses.json."

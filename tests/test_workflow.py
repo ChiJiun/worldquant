@@ -107,3 +107,39 @@ def test_workflow_records_template_candidates(settings):
 
     assert templates
     assert templates[0]["family"] == "test_family"
+
+
+def test_workflow_outputs_use_stable_cumulative_files(settings):
+    settings.ensure_directories()
+    hypotheses = settings.output_dir / "alpha_hypotheses.json"
+    hypotheses.write_text(
+        json.dumps(
+            {
+                "hypotheses": [
+                    {
+                        "id": "test_hypothesis",
+                        "family": "test_family",
+                        "rationale": "A testable economic mechanism.",
+                        "alphas": [{"expression": "rank(close)"}],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runner = AlphaDiscoveryWorkflow(settings)
+    try:
+        first_report = runner.run(hypotheses, promote=True)
+        second_report = runner.run(hypotheses, promote=True)
+    finally:
+        runner.close()
+
+    assert first_report == second_report
+    assert first_report.name == "alpha_workflow_report.md"
+    report_text = first_report.read_text(encoding="utf-8")
+    assert report_text.count("## Run ") == 2
+
+    promotable = json.loads((settings.output_dir / "promotable_families.json").read_text(encoding="utf-8"))
+    assert len(promotable) == 2
+    assert all(row["family"] == "test_family" for row in promotable)

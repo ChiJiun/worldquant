@@ -154,9 +154,10 @@ class AlphaDiscoveryWorkflow:
         raise TimeoutError(f"Simulation {simulation_id} timed out")
 
     def _write_report(self, hypotheses_path: Path, records: List[SimulationRecord], *, promote: bool) -> Path:
-        report_path = self.settings.output_dir / f"alpha_workflow_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.md"
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        report_path = self.settings.output_dir / "alpha_workflow_report.md"
         lines = [
-            "# Alpha Discovery Workflow Report",
+            f"## Run {run_id}",
             "",
             f"- input: `{hypotheses_path}`",
             f"- promote: `{promote}`",
@@ -181,12 +182,20 @@ class AlphaDiscoveryWorkflow:
                     expr=record.candidate.expression.replace("|", "\\|"),
                 )
             )
-        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if report_path.exists() and report_path.stat().st_size > 0:
+            with report_path.open("a", encoding="utf-8") as handle:
+                handle.write("\n" + "\n".join(lines) + "\n")
+        else:
+            report_path.write_text("# Alpha Discovery Workflow Report\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
         return report_path
 
     def _write_promotable_families(self, records: List[SimulationRecord]) -> None:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        recorded_at = datetime.now(timezone.utc).isoformat()
         rows = [
             {
+                "run_id": run_id,
+                "recorded_at": recorded_at,
                 "family": record.candidate.template_type,
                 "expression": record.candidate.expression,
                 "triage_decision": (record.metrics.extras or {}).get("triage_decision", ""),
@@ -200,4 +209,14 @@ class AlphaDiscoveryWorkflow:
             if (record.metrics.extras or {}).get("triage_decision") in {"submit_ready", "refine_candidate"}
         ]
         path = self.settings.output_dir / "promotable_families.json"
-        path.write_text(json.dumps(rows, indent=2, ensure_ascii=True), encoding="utf-8")
+        existing: List[Dict[str, Any]] = []
+        if path.exists() and path.stat().st_size > 0:
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    existing = loaded
+            except json.JSONDecodeError:
+                legacy_path = path.with_name("promotable_families_legacy.json")
+                path.replace(legacy_path)
+        existing.extend(rows)
+        path.write_text(json.dumps(existing, indent=2, ensure_ascii=True), encoding="utf-8")

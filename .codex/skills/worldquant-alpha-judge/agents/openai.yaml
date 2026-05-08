@@ -1,0 +1,4 @@
+interface:
+  display_name: "WorldQuant Alpha Judge"
+  short_description: "Simulate, triage, and refine BRAIN alpha candidates"
+  default_prompt: "Use $worldquant-alpha-judge to run alpha-workflow, classify results, and propose mechanism-preserving refinements."

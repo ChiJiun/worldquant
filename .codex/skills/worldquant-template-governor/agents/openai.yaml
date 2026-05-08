@@ -1,0 +1,4 @@
+interface:
+  display_name: "WorldQuant Template Governor"
+  short_description: "Promote vetted alpha families into GA templates"
+  default_prompt: "Use $worldquant-template-governor to review promotable families and maintain vetted GA templates."

@@ -11,8 +11,12 @@ Use this skill as the operating procedure for this repo's alpha mining loop. Kee
 
 Read `references/repo-map.md` before changing code or running commands.
 Read `references/quality-rubric.md` before judging simulated alphas or changing thresholds.
-Use `knowledge-base-search-skill` when local WorldQuant field/operator/optimization knowledge is needed.
-Use `factor-backtest-skill` when batching exactly 8 expressions through a multi-simulation flow.
+Read `.codex/memories/worldquant_brain_research_principles.md` before acting as Hypothesis Scout when the file exists.
+Use `worldquant-hypothesis-scout` for research and `outputs/alpha_hypotheses.json` creation.
+Use `worldquant-alpha-judge` for simulation triage and refinement decisions.
+Use `worldquant-template-governor` for template promotion and GA family governance.
+
+Agent independence rule: each role makes its own decision from persisted artifacts, not from another role's private reasoning. The Scout writes hypotheses, the Judge evaluates simulation results without editing Scout conclusions, and the Governor promotes only from judged artifacts. If a later role disagrees, record a separate decision instead of rewriting the prior role's rationale.
 
 Primary tool command:
 
@@ -97,14 +101,6 @@ After adding or editing templates, run:
 C:\Users\USER\anaconda3\python.exe -m app generate --count 10
 C:\Users\USER\anaconda3\python.exe -m pytest
 ```
-
-## Research Log
-
-When the installed recorder skill is available, use `alpha-research-recorder` style logs:
-
-- Create `session_meta` before any round.
-- Create a `round_NNNN.yml` after each scout/judge cycle.
-- Fill economic fields first: hypothesis, interpretation, insights.
 
 ## Guardrails
 

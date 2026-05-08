@@ -14,8 +14,9 @@ Use these files for this workspace:
 - `app/quality.py`: pre-simulation expression filters.
 - `config/fields.json`: available fields, wrappers, groups, and decays.
 - `config/templates.json`: vetted GA template families. This may be `{}` until good families are promoted.
-- `.codex/skills/factor_backtest`: external Rule-of-8 multi-simulation skill from GRD-Chang/worldquant-skill.
-- `.codex/skills/knowledge_base_search`: external knowledge-search skill from GRD-Chang/worldquant-skill. The upstream repo currently includes only the skill instructions, not the `Resources/` knowledge base referenced by the skill.
+- `.codex/skills/worldquant-hypothesis-scout`: independent research role that creates `outputs/alpha_hypotheses.json`.
+- `.codex/skills/worldquant-alpha-judge`: independent simulation triage role.
+- `.codex/skills/worldquant-template-governor`: independent template promotion and GA governance role.
 
 Default outputs:
 
