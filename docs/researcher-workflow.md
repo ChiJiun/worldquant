@@ -180,15 +180,15 @@ Use standard labels:
 The deterministic recorder maintains:
 
 ```text
-research/family_memory.json
-research/experiment_decisions.jsonl
+research/state/family_memory.json
+research/logs/experiment_decisions.jsonl
 research/failure_taxonomy.json
-research/passed_alphas.csv
-research/failed_alphas.csv
-research/best_alphas.txt
+research/logs/passed_alphas.csv
+research/logs/failed_alphas.csv
+research/state/best_alphas.txt
 ```
 
-Use JSONL for append-only logs and JSON for current state snapshots. Reusable lessons live inside `family_memory.json` to avoid creating extra per-round files.
+Use JSONL for append-only logs and JSON for current state snapshots. Runtime state and logs live in ignored subdirectories under `research/`. Reusable lessons live inside `research/state/family_memory.json` to avoid creating extra per-round files.
 
 ## Main Researcher Prompt Core
 

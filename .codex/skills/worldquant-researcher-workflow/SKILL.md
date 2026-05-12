@@ -5,6 +5,23 @@ description: "Run disciplined WorldQuant BRAIN alpha research workflows. Use whe
 
 # WorldQuant Researcher Workflow
 
+## Invocation
+
+Use the skill command with an explicit mode when you want to force a loop:
+
+```text
+$worldquant-researcher-workflow pass-alpha-search
+$worldquant-researcher-workflow pass-alpha-improvement
+$worldquant-researcher-workflow literature-scout
+$worldquant-researcher-workflow hypothesis-builder
+$worldquant-researcher-workflow alpha-designer
+$worldquant-researcher-workflow result-reflector
+$worldquant-researcher-workflow template-governor
+```
+
+If no mode is provided, infer the mode from research memory and the latest artifacts.
+If the explicit command and the memory state conflict, follow the explicit command unless it would violate a hard stop condition.
+
 ## Core Rule
 
 Replace the junior researcher behavior, not the backtest system.
@@ -26,11 +43,11 @@ candidate IO -> simulation submit/poll/result -> metrics parsing -> artifacts
 
 Before proposing any alpha, read the available state:
 
-- `research/family_memory.json`
-- `research/experiment_decisions.jsonl`
-- `research/best_alphas.txt`
-- `research/passed_alphas.csv`
-- `research/failed_alphas.csv`
+- `research/state/family_memory.json`
+- `research/logs/experiment_decisions.jsonl`
+- `research/state/best_alphas.txt`
+- `research/logs/passed_alphas.csv`
+- `research/logs/failed_alphas.csv`
 - `outputs/simulate_results.jsonl`
 - `outputs/simulate_errors.jsonl`
 - `data/candidates.jsonl`
@@ -44,11 +61,25 @@ C:\Users\USER\anaconda3\python.exe -m app init-research
 
 ## One-Round Workflow
 
+The workflow has two loops:
+
+- `pass_alpha_search_loop`: search for the first candidate that can plausibly pass validation.
+- `pass_alpha_improvement_loop`: improve an already pass-worthy candidate until it is ready to submit.
+
 Perform one loop at a time.
+
+## Loop Policy
+
+- In `pass_alpha_search_loop`, keep proposing new families until one family produces a pass-worthy candidate or the family is abandoned.
+- If a family is abandoned, write that outcome into research memory and immediately continue searching with a new family.
+- In `pass_alpha_improvement_loop`, stay on the same family and change only one design dimension at a time.
+- If the pass-worthy family can no longer improve meaningfully, freeze the best candidate for that family and stop tuning that family.
+- The overall workflow stops only when a pass-worthy candidate is finalized, the user stops it, or the invocation safety limit is reached.
 
 1. Diagnose current state.
    - Identify best global candidate, best family candidate, recent failures, and stopped families.
    - If any candidate has `Fitness > 1.2` and `Turnover < 40`, prioritize validation over more tuning.
+   - Once a family has a pass-worthy candidate, stay in `pass_alpha_improvement_loop` until validation blocks clear or the family is stopped.
 
 2. Choose exactly one mode:
    - `literature_scout`: find mechanism, no formula.
@@ -100,10 +131,10 @@ Use these fixed files/directories:
 - `outputs/current_run/`: overwrite the latest simulation snapshot.
 - `outputs/simulate_results.jsonl`: append cumulative live results.
 - `outputs/simulate_errors.jsonl`: append cumulative errors.
-- `research/family_memory.json`: current research memory.
-- `research/experiment_decisions.jsonl`: append decisions.
-- `research/passed_alphas.csv` and `research/failed_alphas.csv`: append candidate classification.
-- `research/best_alphas.txt`: overwrite best summary.
+- `research/state/family_memory.json`: current research memory.
+- `research/logs/experiment_decisions.jsonl`: append decisions.
+- `research/logs/passed_alphas.csv` and `research/logs/failed_alphas.csv`: append candidate classification.
+- `research/state/best_alphas.txt`: overwrite best summary.
 
 Do not create ad hoc Markdown reports, extra analysis files, new prompt files, or per-round notes unless the user explicitly asks.
 
@@ -111,7 +142,7 @@ Validation commands should print to stdout by default. Use `--write-artifact` on
 
 ## Memory Discipline
 
-When an experiment teaches something reusable, write it into `research/family_memory.json` instead of creating a new file.
+When an experiment teaches something reusable, write it into `research/state/family_memory.json` instead of creating a new file.
 
 Useful lessons include:
 

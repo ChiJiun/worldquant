@@ -8,7 +8,8 @@ from app.api import RateLimiter, build_client
 from app.config import Settings
 from app.logging_utils import configure_logging
 from app.models import AlphaCandidate
-from app.research import initialize_research_dir
+from app.research import initialize_research_dir, summarize_workflow_state
+from app.selection import run_selection_pipeline
 from app.simulator import SimulateRunner, render_metrics
 from app.validation import validate_candidate_from_memory
 
@@ -36,7 +37,16 @@ def make_parser() -> argparse.ArgumentParser:
     validate.add_argument("--candidate-id", default=None, help="Candidate id to validate. Defaults to global best")
     validate.add_argument("--write-artifact", action="store_true", help="Append validation_reports files. Default prints only")
 
+    research = subparsers.add_parser("research", help="Summarize the current research loop state")
+    research.add_argument(
+        "--mode",
+        default="auto",
+        choices=["auto", "pass-alpha-search", "pass-alpha-improvement"],
+        help="Force or inspect the current research loop mode",
+    )
+
     subparsers.add_parser("settings", help="Print non-secret effective settings")
+    subparsers.add_parser("select-alphas", help="Build low-correlation best alpha pool and submit queue")
     return parser
 
 
@@ -60,6 +70,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "settings":
         _print_settings(settings)
+        return 0
+
+    if args.command == "select-alphas":
+        report = run_selection_pipeline(settings.research_dir, settings.output_dir)
+        print(render_metrics_payload(report))
+        return 0
+
+    if args.command == "research":
+        report = summarize_workflow_state(settings.research_dir, requested_mode=args.mode)
+        print(render_metrics_payload(report))
         return 0
 
     if args.command == "login-check":
@@ -103,10 +123,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 def _init_data(settings: Settings) -> None:
     if not settings.candidate_file.exists():
-        settings.candidate_file.write_text(
-            '{"candidate_id":"A_manual_001","family":"api_smoke","expression":"rank(close)","notes":"Replace with one expression per line."}\n',
-            encoding="utf-8",
-        )
+        example_path = Path(__file__).resolve().parents[1] / "data" / "candidates.example.jsonl"
+        settings.candidate_file.parent.mkdir(parents=True, exist_ok=True)
+        settings.candidate_file.write_text(example_path.read_text(encoding="utf-8"), encoding="utf-8")
     initialize_research_dir(settings.research_dir)
 
 

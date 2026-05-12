@@ -1,6 +1,7 @@
 import json
 
 from app.api import MockBrainClient, RateLimiter
+from app.research_paths import research_paths
 from app.simulator import SimulateRunner, read_candidates
 
 
@@ -29,8 +30,9 @@ def test_simulate_runner_writes_run_artifacts(settings):
     assert summary["succeeded"] == 1
     assert (run_dir / "results.jsonl").exists()
     assert (settings.output_dir / "simulate_results.jsonl").exists()
-    assert (settings.research_dir / "family_memory.json").exists()
-    assert (settings.research_dir / "experiment_decisions.jsonl").exists()
+    paths = research_paths(settings.research_dir)
+    assert paths.family_memory.exists()
+    assert paths.experiment_decisions.exists()
 
 
 def test_simulate_runner_can_overwrite_current_run(settings):

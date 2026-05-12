@@ -1,27 +1,29 @@
 import json
 
 from app.research import initialize_research_dir, record_research_artifacts
+from app.research_paths import research_paths
 
 
 def test_research_artifacts_record_validation_candidate(tmp_path):
     research_dir = tmp_path / "research"
     initialize_research_dir(research_dir)
+    paths = research_paths(research_dir)
 
     record_research_artifacts(
         research_dir,
         [
             {
                 "recorded_at": "2026-05-09T00:00:00Z",
-                "candidate_id": "A_best",
-                "family": "long_horizon_return_zscore_reversal",
-                "expression": "signed_power(-ts_decay_linear(returns, 90), 0.95)",
+                "candidate_id": "C_pass",
+                "family": "long_horizon_zscore_plus_close_location_ensemble",
+                "expression": "zscore(-ts_decay_linear(((returns - ts_mean(returns, 120)) / (1 + ts_std_dev(returns, 120))), 100)) + zscore(-ts_decay_linear(((close - low) / (high - low)), 10))",
                 "result_id": "alpha-1",
                 "metrics": {
-                    "sharpe": 1.18,
-                    "fitness": 1.39,
-                    "returns": 0.1724,
-                    "drawdown": 0.1201,
-                    "turnover": 0.1074,
+                    "sharpe": 1.65,
+                    "fitness": 1.1,
+                    "returns": 0.1972,
+                    "drawdown": 0.1023,
+                    "turnover": 0.4415,
                     "checks_failed": 0,
                 },
             }
@@ -29,21 +31,60 @@ def test_research_artifacts_record_validation_candidate(tmp_path):
         [],
     )
 
-    memory = json.loads((research_dir / "family_memory.json").read_text(encoding="utf-8"))
-    family = memory["families"]["long_horizon_return_zscore_reversal"]
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
+    family = memory["families"]["long_horizon_zscore_plus_close_location_ensemble"]
     assert family["status"] == "candidate_validation"
-    assert family["best_candidate"]["candidate_id"] == "A_best"
-    assert memory["global_best"]["candidate_id"] == "A_best"
+    assert family["workflow_loop"] == "pass_alpha_improvement_loop"
+    assert family["best_candidate"]["candidate_id"] == "C_pass"
+    assert memory["global_best"]["candidate_id"] == "C_pass"
 
-    decisions = (research_dir / "experiment_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    decisions = paths.experiment_decisions.read_text(encoding="utf-8").splitlines()
     assert len(decisions) == 1
-    assert json.loads(decisions[0])["decision"] == "validate_best_candidate"
-    assert (research_dir / "passed_alphas.csv").exists()
-    assert "A_best" in (research_dir / "best_alphas.txt").read_text(encoding="utf-8")
+    latest = json.loads(decisions[0])
+    assert latest["decision"] == "validate_best_candidate"
+    assert latest["workflow_loop"] == "pass_alpha_improvement_loop"
+    assert paths.passed_alphas.exists()
+    assert "C_pass" in paths.best_alphas.read_text(encoding="utf-8")
+
+
+def test_research_tracks_pass_alpha_search_loop_before_validation(tmp_path):
+    research_dir = tmp_path / "research"
+    initialize_research_dir(research_dir)
+    paths = research_paths(research_dir)
+
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "recorded_at": "2026-05-09T00:00:00Z",
+                "candidate_id": "A_search",
+                "family": "long_horizon_return_zscore_reversal",
+                "expression": "signed_power(-ts_decay_linear(returns, 20), 0.95)",
+                "result_id": "alpha-0",
+                "metrics": {
+                    "sharpe": 0.94,
+                    "fitness": 0.64,
+                    "returns": 0.1659,
+                    "drawdown": 0.1451,
+                    "turnover": 0.3538,
+                    "checks_failed": 2,
+                },
+            }
+        ],
+        [],
+    )
+
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
+    family = memory["families"]["long_horizon_return_zscore_reversal"]
+    decision = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
+
+    assert family["workflow_loop"] == "pass_alpha_search_loop"
+    assert decision["workflow_loop"] == "pass_alpha_search_loop"
 
 
 def test_research_artifacts_record_platform_error(tmp_path):
     research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
     record_research_artifacts(
         research_dir,
         [],
@@ -59,13 +100,14 @@ def test_research_artifacts_record_platform_error(tmp_path):
         ],
     )
 
-    failed = (research_dir / "failed_alphas.csv").read_text(encoding="utf-8")
+    failed = paths.failed_alphas.read_text(encoding="utf-8")
     assert "A_bad" in failed
     assert "operator_invalid" in failed
 
 
 def test_research_replaces_mock_best_with_live_result(tmp_path):
     research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
     record_research_artifacts(
         research_dir,
         [
@@ -93,17 +135,18 @@ def test_research_replaces_mock_best_with_live_result(tmp_path):
         [],
     )
 
-    memory = json.loads((research_dir / "family_memory.json").read_text(encoding="utf-8"))
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
     assert memory["global_best"]["candidate_id"] == "A_live"
     assert memory["families"]["f"]["best_candidate"]["candidate_id"] == "A_live"
 
-    latest_decision = json.loads((research_dir / "experiment_decisions.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    latest_decision = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
     assert latest_decision["decision"] == "fix_validation_failure"
     assert latest_decision["dominant_bottleneck"] == "validation_failed"
 
 
 def test_research_records_one_change_lessons_in_family_memory(tmp_path):
     research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
     record_research_artifacts(
         research_dir,
         [
@@ -132,7 +175,7 @@ def test_research_records_one_change_lessons_in_family_memory(tmp_path):
         [],
     )
 
-    memory = json.loads((research_dir / "family_memory.json").read_text(encoding="utf-8"))
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
     lessons = memory["families"]["f"]["lessons"]
     assert lessons
     assert lessons[-1]["changed_dimension"] == "decay_20_to_60"

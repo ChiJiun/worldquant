@@ -1,11 +1,13 @@
 import json
 
 from app.validation import validate_candidate_from_memory
+from app.research_paths import research_paths
 
 
 def test_validate_candidate_blocks_without_live_checks(tmp_path):
     research_dir = tmp_path / "research"
     research_dir.mkdir()
+    paths = research_paths(research_dir)
     (research_dir / "family_memory.json").write_text(
         json.dumps(
             {
@@ -27,13 +29,14 @@ def test_validate_candidate_blocks_without_live_checks(tmp_path):
     assert report["decision"] == "validation_incomplete"
     assert report["overall_status"] == "blocked"
     assert "self_corr" in report["blocking_checks"]
-    assert (research_dir / "validation_reports.jsonl").exists()
-    assert (research_dir / "validation_reports.csv").exists()
+    assert paths.validation_reports_jsonl.exists()
+    assert paths.validation_reports_csv.exists()
 
 
 def test_validate_candidate_passes_available_platform_checks(tmp_path):
     research_dir = tmp_path / "research"
     research_dir.mkdir()
+    paths = research_paths(research_dir)
     raw = {
         "checks": [
             {"name": "WEIGHT_CONCENTRATION", "result": "PASS"},
@@ -102,6 +105,7 @@ def test_validate_candidate_blocks_pending_self_correlation(tmp_path):
 def test_validate_candidate_does_not_write_reports_by_default(tmp_path):
     research_dir = tmp_path / "research"
     research_dir.mkdir()
+    paths = research_paths(research_dir)
     (research_dir / "family_memory.json").write_text(
         json.dumps(
             {
@@ -120,5 +124,5 @@ def test_validate_candidate_does_not_write_reports_by_default(tmp_path):
 
     validate_candidate_from_memory(research_dir)
 
-    assert not (research_dir / "validation_reports.jsonl").exists()
-    assert not (research_dir / "validation_reports.csv").exists()
+    assert not paths.validation_reports_jsonl.exists()
+    assert not paths.validation_reports_csv.exists()

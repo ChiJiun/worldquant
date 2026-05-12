@@ -7,6 +7,7 @@ import csv
 import json
 
 from app.models import utc_now_iso
+from app.research_paths import ensure_research_layout, existing_or_new, research_paths
 
 FAILURE_TAXONOMY = [
     "turnover_too_high",
@@ -49,32 +50,42 @@ FAILED_FIELDS = PASSED_FIELDS + ["dominant_bottleneck", "error_type", "error"]
 
 
 def initialize_research_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / "experiment_decisions.jsonl").touch(exist_ok=True)
-    (path / "failure_taxonomy.json").write_text(json.dumps(FAILURE_TAXONOMY, indent=2), encoding="utf-8")
-    if not (path / "family_memory.json").exists():
-        (path / "family_memory.json").write_text(
-            json.dumps({"families": {}, "global_best": None, "lessons": [], "updated_at": utc_now_iso()}, indent=2),
-            encoding="utf-8",
-        )
+    paths = ensure_research_layout(path)
+    paths.experiment_decisions.touch(exist_ok=True)
+    paths.failure_taxonomy.write_text(json.dumps(FAILURE_TAXONOMY, indent=2), encoding="utf-8")
+    if not paths.family_memory.exists():
+        legacy_memory = _existing_family_memory_path(path, paths.family_memory)
+        if legacy_memory.exists():
+            paths.family_memory.write_text(legacy_memory.read_text(encoding="utf-8"), encoding="utf-8")
+        else:
+            paths.family_memory.write_text(
+                json.dumps({"families": {}, "global_best": None, "lessons": [], "updated_at": utc_now_iso()}, indent=2),
+                encoding="utf-8",
+            )
+
+
+def _existing_family_memory_path(research_dir: Path, preferred: Path) -> Path:
+    return existing_or_new(preferred, research_dir / "family_memory.json", research_dir / "old" / "family_memory.json")
 
 
 def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, Any]], errors: Iterable[Dict[str, Any]]) -> None:
     initialize_research_dir(research_dir)
+    paths = research_paths(research_dir)
     result_rows = list(results)
     error_rows = list(errors)
     if not result_rows and not error_rows:
         return
 
-    memory = _load_memory(research_dir / "family_memory.json")
+    memory = _load_memory(_existing_family_memory_path(research_dir, paths.family_memory))
     decisions: List[Dict[str, Any]] = []
     passed_rows: List[Dict[str, Any]] = []
     failed_rows: List[Dict[str, Any]] = []
 
     for result in result_rows:
         decision = _decision_from_result(result, memory)
-        decisions.append(decision)
         _update_memory(memory, result, decision)
+        decision["workflow_loop"] = memory["families"].get(str(result.get("family") or "manual"), {}).get("workflow_loop")
+        decisions.append(decision)
         flat = _flat_result_row(result, decision)
         if decision["decision"] in {"validate_best_candidate", "promote_candidate"}:
             passed_rows.append(flat)
@@ -87,12 +98,12 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
         _update_error_memory(memory, error, decision)
         failed_rows.append(_flat_error_row(error, decision))
 
-    _write_jsonl(research_dir / "experiment_decisions.jsonl", decisions)
-    _append_csv(research_dir / "passed_alphas.csv", PASSED_FIELDS, passed_rows)
-    _append_csv(research_dir / "failed_alphas.csv", FAILED_FIELDS, failed_rows)
+    _write_jsonl(paths.experiment_decisions, decisions)
+    _append_csv(paths.passed_alphas, PASSED_FIELDS, passed_rows)
+    _append_csv(paths.failed_alphas, FAILED_FIELDS, failed_rows)
     memory["updated_at"] = utc_now_iso()
-    (research_dir / "family_memory.json").write_text(json.dumps(memory, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
-    _write_best_alphas(research_dir / "best_alphas.txt", memory)
+    paths.family_memory.write_text(json.dumps(memory, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    _write_best_alphas(paths.best_alphas, memory)
 
 
 def _load_memory(path: Path) -> Dict[str, Any]:
@@ -114,6 +125,7 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
     metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
     family = str(result.get("family") or "manual")
     current_fitness = _float(metrics.get("fitness"))
+    current_sharpe = _float(metrics.get("sharpe"))
     current_turnover = _turnover_percent(metrics.get("turnover"))
     checks_failed = _checks_failed(metrics)
     best_fitness = _best_family_fitness(memory, family)
@@ -132,6 +144,14 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
     if checks_failed > 0:
         decision = "fix_validation_failure"
         next_action = {"type": "validate_checks", "checks": ["weight_concentration", "sub_universe_sharpe", "self_corr"], "reason": "BRAIN checks failed."}
+    elif current_fitness is not None and current_fitness >= 1.0 and current_sharpe is not None and current_sharpe >= 1.25:
+        decision = "validate_best_candidate"
+        bottleneck = "validation_pending"
+        next_action = {
+            "type": "validate_checks",
+            "checks": ["self_corr", "os_performance"],
+            "reason": "Candidate passed platform hard checks and crossed the pass-alpha gate; stop blind tuning.",
+        }
     elif current_fitness is not None and current_turnover is not None and current_fitness > 1.2 and current_turnover < 40:
         decision = "validate_best_candidate"
         bottleneck = "validation_pending"
@@ -218,6 +238,7 @@ def _update_memory(memory: Dict[str, Any], result: Dict[str, Any], decision: Dic
         family["best_candidate"] = candidate_snapshot
     if _is_better_candidate(candidate_snapshot, memory.get("global_best")):
         memory["global_best"] = candidate_snapshot
+    family["workflow_loop"] = _workflow_loop(family)
 
 
 def _update_error_memory(memory: Dict[str, Any], error: Dict[str, Any], decision: Dict[str, Any]) -> None:
@@ -227,16 +248,79 @@ def _update_error_memory(memory: Dict[str, Any], error: Dict[str, Any], decision
     family["consecutive_no_improvement"] = int(family.get("consecutive_no_improvement", 0)) + 1
     family["failure_modes"] = _updated_failure_modes(family.get("failure_modes", {}), decision["dominant_bottleneck"])
     family["status"] = _family_status(decision, family)
+    family["workflow_loop"] = _workflow_loop(family)
 
 
 def _family_status(decision: Dict[str, Any], family: Dict[str, Any]) -> str:
     if decision["decision"] == "validate_best_candidate":
         return "candidate_validation"
+    if family.get("workflow_loop") in {"pass_alpha_improvement_loop", "improve_pass_alpha_loop"}:
+        return "pass_alpha_improvement"
     if int(family.get("consecutive_no_improvement", 0)) >= 5:
         return "stopped"
     if family.get("best_candidate"):
         return "development"
     return "exploration"
+
+
+def _workflow_loop(family: Dict[str, Any]) -> str:
+    if _is_pass_alpha_candidate(family.get("best_candidate")):
+        return "pass_alpha_improvement_loop"
+    return "pass_alpha_search_loop"
+
+
+def summarize_workflow_state(research_dir: Path, requested_mode: str = "auto") -> Dict[str, Any]:
+    paths = research_paths(research_dir)
+    memory = _load_memory(_existing_family_memory_path(research_dir, paths.family_memory))
+    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
+    active_family_name, active_family = _select_active_family(memory)
+    active_loop = _workflow_loop(active_family) if active_family else "pass_alpha_search_loop"
+    if requested_mode == "pass-alpha-search":
+        requested_loop = "pass_alpha_search_loop"
+    elif requested_mode == "pass-alpha-improvement":
+        requested_loop = "pass_alpha_improvement_loop"
+    else:
+        requested_loop = active_loop
+    best_candidate = memory.get("global_best")
+    return {
+        "requested_mode": requested_mode,
+        "active_mode": requested_loop,
+        "active_loop": active_loop,
+        "active_family": active_family_name,
+        "family_status": active_family.get("status") if isinstance(active_family, dict) else None,
+        "global_best_candidate": best_candidate.get("candidate_id") if isinstance(best_candidate, dict) else None,
+        "best_family_candidate": active_family.get("best_candidate", {}).get("candidate_id") if isinstance(active_family, dict) and isinstance(active_family.get("best_candidate"), dict) else None,
+        "suggested_next_action": _research_next_action(requested_loop, active_loop, active_family),
+        "family_count": len(families),
+    }
+
+
+def _select_active_family(memory: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    families = memory.get("families", {})
+    if not isinstance(families, dict) or not families:
+        return "manual", {}
+    global_best = memory.get("global_best")
+    if isinstance(global_best, dict):
+        family_name = str(global_best.get("family") or "manual")
+        family = families.get(family_name)
+        if isinstance(family, dict):
+            return family_name, family
+    for family_name, family in families.items():
+        if isinstance(family, dict) and family.get("best_candidate"):
+            return str(family_name), family
+    family_name, family = next(iter(families.items()))
+    return str(family_name), family if isinstance(family, dict) else {}
+
+
+def _research_next_action(requested_loop: str, active_loop: str, family: Dict[str, Any]) -> Dict[str, Any]:
+    if requested_loop == "pass_alpha_improvement_loop" or active_loop == "pass_alpha_improvement_loop":
+        if isinstance(family.get("best_candidate"), dict):
+            return {
+                "type": "validate_checks" if _is_pass_alpha_candidate(family.get("best_candidate")) else "test_formula",
+                "reason": "Improve the current pass-worthy family on one design dimension at a time.",
+            }
+        return {"type": "test_formula", "reason": "No pass-worthy family found yet; continue search or switch families."}
+    return {"type": "test_formula", "reason": "Search for a new family or a new one-change candidate."}
 
 
 def _dominant_bottleneck(metrics: Dict[str, Any]) -> str:
@@ -473,6 +557,12 @@ def _is_better_candidate(candidate: Dict[str, Any], current_best: Any) -> bool:
     candidate_fitness = _fitness_from_candidate(candidate)
     best_fitness = _fitness_from_candidate(current_best)
     return candidate_fitness is not None and (best_fitness is None or candidate_fitness > best_fitness)
+
+
+def _is_pass_alpha_candidate(candidate: Any) -> bool:
+    if not isinstance(candidate, dict):
+        return False
+    return str(candidate.get("decision") or "") in {"validate_best_candidate", "promote_candidate"}
 
 
 def _is_mock_candidate(candidate: Any) -> bool:

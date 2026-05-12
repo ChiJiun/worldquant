@@ -18,6 +18,14 @@ outputs/*
 
 outputs_*/
 
+research/*
+!research/README.md
+!research/failure_taxonomy.json
+!research/schema/
+!research/schema/**
+!research/examples/
+!research/examples/**
+
 logs/*
 !logs/README.md
 logs_old_*/

@@ -6,6 +6,7 @@ import csv
 import json
 
 from app.models import utc_now_iso
+from app.research_paths import ensure_research_layout, existing_or_new
 
 
 VALIDATION_CHECKS = [
@@ -28,15 +29,16 @@ CSV_FIELDS = [
 
 
 def validate_candidate_from_memory(research_dir: Path, candidate_id: Optional[str] = None, *, persist: bool = False) -> Dict[str, Any]:
-    memory = _load_json(research_dir / "family_memory.json")
+    paths = ensure_research_layout(research_dir)
+    memory = _load_json(existing_or_new(paths.family_memory, research_dir / "family_memory.json", research_dir / "old" / "family_memory.json"))
     candidate = _select_candidate(memory, candidate_id)
     if candidate is None:
         raise ValueError(f"Candidate not found in family_memory.json: {candidate_id or '<global_best>'}")
 
     report = _build_report(candidate)
     if persist:
-        _append_jsonl(research_dir / "validation_reports.jsonl", [report])
-        _append_csv(research_dir / "validation_reports.csv", [_flat_report(report)])
+        _append_jsonl(paths.validation_reports_jsonl, [report])
+        _append_csv(paths.validation_reports_csv, [_flat_report(report)])
     return report
 
 

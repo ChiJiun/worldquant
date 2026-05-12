@@ -7,14 +7,33 @@
 ## 核心流程
 
 ```text
-data/candidates.jsonl
-  -> python -m app simulate
-  -> outputs/runs/<run_id>/
-  -> outputs/simulate_results.jsonl
-  -> outputs/simulate_errors.jsonl
-  -> research/family_memory.json
-  -> research/experiment_decisions.jsonl
+LLM researcher
+  -> read research/state + research/logs + outputs
+  -> design exactly one candidate in data/candidates.jsonl
+  -> python -m app simulate --limit 1 --current-run
+  -> BRAIN API submit / poll / result parsing
+  -> outputs/current_run + cumulative outputs/*.jsonl
+  -> research/state + research/logs
+  -> LLM reflects and decides stop / continue / validate / select
 ```
+
+## Workflow 總覽
+
+這個 repo 把研究判斷和 deterministic IO 分開：
+
+- LLM/Codex 負責：找市場機制、建立假說、設計一條 alpha、一次只改一個變因、讀結果、歸因 bottleneck、更新下一步。
+- Python 程式負責：讀 candidate、登入 BRAIN、送 simulate、poll、抓 result、解析 metrics、寫 artifacts。
+- `research/` 負責保存本機研究狀態；GitHub 只追蹤說明、schema、failure taxonomy，不追蹤實驗流水帳和 alpha 狀態。
+- `outputs/` 是程式輸出，不手寫；`data/` 是人工或 LLM 準備輸入的地方。
+
+一輪標準流程：
+
+1. 讀 `research/state/family_memory.json`、`research/logs/*`、`outputs/simulate_results.jsonl`。
+2. 在 `data/candidates.jsonl` 放入一條 candidate。
+3. 執行 `python -m app simulate --limit 1 --current-run`。
+4. 程式寫入 `outputs/current_run/`、`outputs/simulate_results.jsonl` 或 `outputs/simulate_errors.jsonl`。
+5. recorder 更新 `research/state/family_memory.json`、`research/logs/experiment_decisions.jsonl`、`passed_alphas.csv` 或 `failed_alphas.csv`。
+6. 若 candidate 接近提交門檻，先跑 validation；若有多個可用 alpha，再跑 selection 做低相關性篩選。
 
 ## 目錄
 
@@ -27,6 +46,10 @@ Python 程式。現在只保留：
 - `config.py`: 讀 `.env` 與 simulation settings。
 - `api/clients.py`: WorldQuant login / simulate / poll / result client。
 - `simulator.py`: 讀候選、跑 simulate、寫 JSONL artifacts。
+- `research.py`: 更新 family memory、passed/failed logs、decision log。
+- `validation.py`: 從 research memory 產生 validation report。
+- `selection.py`: 對 passed alphas 做 fingerprint、相關性 clustering、submit queue。
+- `research_paths.py`: 集中定義 `research/` 新 layout，並保留舊路徑 fallback。
 - `cli.py`: CLI entry point。
 
 ```text
@@ -60,14 +83,21 @@ outputs/
 research/
 ```
 
-研究員 layer 的狀態與記憶。這些檔案由 simulate 後的 recorder 更新，LLM 下一輪要先讀這裡：
+研究員 layer 的狀態與記憶。GitHub 只保留說明、分類與 schema/example；實際實驗狀態預設寫到 ignored 子目錄，避免把本機 alpha、portfolio、validation 記錄推上遠端。
 
-- `research/family_memory.json`: family -> variants -> best candidate -> failure modes -> reusable lessons。
-- `research/experiment_decisions.jsonl`: 每條結果的 bottleneck、decision、next action。
-- `research/passed_alphas.csv`: 進入 validation 的候選。
-- `research/failed_alphas.csv`: 未通過或平台錯誤的候選。
-- `research/best_alphas.txt`: global best 與每個 family best 的短摘要。
 - `research/failure_taxonomy.json`: 標準 failure labels。
+- `research/README.md`: research artifact 管理規則。
+- `research/schema/`: artifact 欄位與 layout 文件。
+- `research/examples/`: 可公開的小型 sanitized 範例。
+- `research/state/family_memory.json`: family -> variants -> best candidate -> failure modes -> reusable lessons。
+- `research/state/best_alphas.txt`: global best 與每個 family best 的短摘要。
+- `research/state/portfolio.json`: 本機最佳因子/portfolio 狀態。
+- `research/logs/experiment_decisions.jsonl`: 每條結果的 bottleneck、decision、next action。
+- `research/logs/passed_alphas.csv`: 進入 validation 的候選。
+- `research/logs/failed_alphas.csv`: 未通過或平台錯誤的候選。
+- `research/logs/validation_reports.*`: validation report，只有指定 `--write-artifact` 時才寫入。
+- `research/submissions/submitted_alphas.csv`: 本機提交追蹤。
+- `research/notes/hypotheses.md`: working notes；要公開時請整理到 `docs/` 或 `research/examples/`。
 
 ```text
 config/
@@ -123,6 +153,76 @@ C:\Users\USER\anaconda3\python.exe -m app init-data
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m app init-research
 ```
+
+查看或指定 research mode：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app research --mode pass-alpha-improvement
+```
+
+可用模式：
+
+- `auto`
+- `pass-alpha-search`
+- `pass-alpha-improvement`
+
+啟動研究 workflow：
+
+```text
+$worldquant-researcher-workflow
+$worldquant-researcher-workflow pass-alpha-search
+$worldquant-researcher-workflow pass-alpha-improvement
+```
+
+這個入口會讀 `research/state/family_memory.json` 自動判斷目前是在，或依你指定的 mode 強制進入：
+
+- `pass_alpha_search_loop`
+- `pass_alpha_improvement_loop`
+
+目前這兩個 loop 不是獨立 CLI，而是同一個 research workflow 的兩個狀態。
+Python 負責 simulate / validation / artifact IO，Codex agent 負責研究判斷。
+
+優先使用 skill 命令直接選 loop；`python -m app research --mode ...` 只算 debug / 狀態檢查入口。
+
+## Workflow 呼叫
+
+主要入口是 skill 指令，不是 Python CLI：
+
+```text
+$worldquant-researcher-workflow
+```
+
+這會讓 Codex 依 `research/state/family_memory.json` 自動決定目前該進哪個 loop。
+
+如果你想手動指定流程，可以直接帶 mode：
+
+```text
+$worldquant-researcher-workflow pass-alpha-search
+$worldquant-researcher-workflow pass-alpha-improvement
+$worldquant-researcher-workflow literature-scout
+$worldquant-researcher-workflow hypothesis-builder
+$worldquant-researcher-workflow alpha-designer
+$worldquant-researcher-workflow result-reflector
+$worldquant-researcher-workflow template-governor
+```
+
+對應意義：
+
+- `pass-alpha-search`: 找新的 family / hypothesis，直到找到第一個可 pass 的 alpha。
+- `pass-alpha-improvement`: 針對既有 pass alpha 做單變因改善，直到沒有明顯改善空間。
+- `literature-scout`: 讀文獻找市場機制，不先寫公式。
+- `hypothesis-builder`: 把市場機制整理成可驗證假說。
+- `alpha-designer`: 產生一條具體 alpha。
+- `result-reflector`: 讀最新結果，判斷下一步。
+- `template-governor`: 把穩定 family 整理成 template。
+
+如果你只是想看目前狀態，不是要真正跑 workflow，可以用：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app research --mode auto
+```
+
+這個指令只會回報狀態，不是主工作流入口。
 
 檢查設定，不印出帳密：
 
@@ -197,9 +297,39 @@ LLM 只能做研究判斷，不直接替代回測或 validation。
 - 每條 alpha 只改一個 design dimension。
 - 如果 `Fitness > 1.2` 且 `Turnover < 40%`，停止盲目調參，先進入 validation。
 - 同一 family 連續 5 次沒有改善，標記為 stopped。
-- 每個失敗都寫入 `research/failed_alphas.csv` 和 `research/experiment_decisions.jsonl`。
+- 每個失敗都寫入 `research/logs/failed_alphas.csv` 和 `research/logs/experiment_decisions.jsonl`。
 - workflow 不因單輪實驗完成而停止；只有找到有提交機會的 alpha、family stop rule 觸發、使用者要求停止，或本次執行安全上限到達時才停。
-- 學到的 reusable lesson 寫進 `research/family_memory.json`，不要為每輪分析另開新檔。
+- 學到的 reusable lesson 寫進 `research/state/family_memory.json`，不要為每輪分析另開新檔。
+
+### 兩個 loop 的呼叫方式
+
+`pass_alpha_search_loop` 和 `pass_alpha_improvement_loop` 都是透過同一個入口啟動：
+
+```text
+$worldquant-researcher-workflow
+```
+
+workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針對既有 pass alpha 做改善。
+如果之後要做成明確的 Python 指令，再另外加 `python -m app research --mode ...` 類型的入口。
+
+### prompt
+
+從.codex讀取 worldquant 量化研究員的skill，遵循其workflow，不斷尋找alpha，務必找到fitness>2.0的alpha
+
+---
+
+並遵循以下流程：
+1️. **上網搜索**文獻研究與異常發現搜尋學術論文、量化部落格、因子投資研究識別市場機制與可觀察模式
+2️. 假說形式化將研究發現轉為可測試的假說明確指定所需的 fields 和 operators
+3️. Alpha 表達式設計使用 WorldQuant BRAIN 語法設計 alpha遵循 one-change-per-experiment 原則
+4️. 回測執行與結果分析透過 simulator 運行回測使用 21 種標準失敗標籤分類
+5️. 變體生成與迭代6 種變體策略（參數掃描、算子替換、欄位替換等）追蹤父子關係進行歸因分析
+6️. 驗證與過擬合檢查7項驗證測試（樣外測試、參數敏感度、交易成本等）計算信心分數
+7️. 相關性聚類與最優選擇以 0.7 相關性閾值聚類從每群中選出最佳代表（考慮IS、turnover、robustness）計算最終投資組合
+
+---
+
+指標記得要幫我做相關性聚類的最優篩選，還要考慮在OS會不會是全域最優，不要在IS overfit，在portolio的檔案用來保存最佳因子
 
 ## 下一步
 
