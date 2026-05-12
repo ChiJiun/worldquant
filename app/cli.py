@@ -46,7 +46,9 @@ def make_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("settings", help="Print non-secret effective settings")
-    subparsers.add_parser("select-alphas", help="Build low-correlation best alpha pool and submit queue")
+    select = subparsers.add_parser("select-alphas", help="Build low-correlation best alpha pool and submit queue")
+    select.add_argument("--finalize-run", action="store_true", help="Persist a structured final selection state for the next workflow turn")
+    select.add_argument("--clear-candidates", action="store_true", help="Clear the candidate input file after final selection succeeds")
     return parser
 
 
@@ -73,7 +75,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "select-alphas":
-        report = run_selection_pipeline(settings.research_dir, settings.output_dir)
+        report = run_selection_pipeline(
+            settings.research_dir,
+            settings.output_dir,
+            finalize=args.finalize_run,
+            candidate_file=settings.candidate_file,
+            clear_candidates=args.clear_candidates,
+        )
         print(render_metrics_payload(report))
         return 0
 

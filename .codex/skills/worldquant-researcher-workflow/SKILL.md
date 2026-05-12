@@ -126,6 +126,7 @@ C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run
    - verify the candidate still preserves the family/hypothesis economic meaning
    - compare against `research/submissions/submitted_alphas.csv`
    - only use `outputs/submit_queue.csv` as the recommended submission list
+   - when the round is complete, run `select-alphas --finalize-run --clear-candidates` so the next workflow can continue from `research/state/latest_final_selection_report.json`
 
 ## Artifact Discipline
 
@@ -142,6 +143,8 @@ Use these fixed files/directories:
 - `research/logs/passed_alphas.csv` and `research/logs/failed_alphas.csv`: append candidate classification.
 - `research/state/best_alphas.txt`: overwrite best summary.
 - `research/submissions/submitted_alphas.csv`: local submitted-alpha registry used to block high-correlation resubmissions.
+- `research/state/latest_final_selection_report.json`: latest structured final selection state for workflow continuation.
+- `research/logs/final_selection_reports.jsonl`: append-only final selection history.
 - `outputs/submit_queue.csv`: final recommended submission queue after variant, economic-meaning, and submitted-correlation gates.
 
 Do not create ad hoc Markdown reports, extra analysis files, new prompt files, or per-round notes unless the user explicitly asks.

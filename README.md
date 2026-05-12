@@ -35,6 +35,7 @@ LLM researcher
 5. recorder 更新 `research/state/family_memory.json`、`research/logs/experiment_decisions.jsonl`、`passed_alphas.csv` 或 `failed_alphas.csv`。
 6. 若 candidate 接近提交門檻，先跑 validation；若有多個可用 alpha，再跑 selection 做低相關性篩選。
 7. selection 會先在同一變體/同收益來源 cluster 中選 best，再排除與 `research/submissions/submitted_alphas.csv` 高相關的 alpha，最後才寫入 `outputs/submit_queue.csv`。
+8. 完整流程收尾時可執行 `select-alphas --finalize-run --clear-candidates`：寫入可接續的 final state，並清空下一輪輸入 `data/candidates.jsonl`。
 
 ## 目錄
 
@@ -341,6 +342,20 @@ workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針�
 3. **已提交相關性檢查**：cluster winner 仍要和 `research/submissions/submitted_alphas.csv` 比對；如果和已提交 alpha 的結構/metric proxy similarity >= 0.85，就不進 `outputs/submit_queue.csv`。
 
 不同 hypothesis 若其實使用同一組 field/operator、同一 direction，或被判定為同一 `core_signal`，也會被視為相同或相似收益來源，進同一 correlation cluster 競爭代表 alpha。
+
+完整流程結束時可用：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-candidates
+```
+
+這會額外寫入：
+
+- `research/state/latest_final_selection_report.json`: 下一輪 workflow 可直接讀的 structured final state。
+- `research/logs/final_selection_reports.jsonl`: 每次 finalize 的 append-only 歷史。
+- `outputs/final_alpha_recommendations.md`: 人類閱讀用報告，包含 expression、IS 表現、經濟意涵、OS/overfit 風險與 submitted correlation。
+
+`data/candidates.jsonl` 只是下一輪輸入，可以在 finalize 後清空。`research/logs/passed_alphas.csv` 不自動刪除，因為它是後續低相關性篩選和收益來源去重的累積候選池。
 
 ## 下一步
 

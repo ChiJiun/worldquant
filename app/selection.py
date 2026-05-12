@@ -155,7 +155,14 @@ class AlphaRecord:
         return row
 
 
-def run_selection_pipeline(research_dir: Path, output_dir: Path) -> Dict[str, Any]:
+def run_selection_pipeline(
+    research_dir: Path,
+    output_dir: Path,
+    *,
+    finalize: bool = False,
+    candidate_file: Optional[Path] = None,
+    clear_candidates: bool = False,
+) -> Dict[str, Any]:
     paths = research_paths(research_dir)
     records = load_passed_alpha_records(existing_or_new(paths.passed_alphas, research_dir / "passed_alphas.csv", research_dir / "old" / "passed_alphas.csv"))
     submitted = load_submitted_alpha_records(existing_or_new(paths.submitted_alphas, research_dir / "submitted_alphas.csv", research_dir / "old" / "submitted_alphas.csv"))
@@ -173,19 +180,26 @@ def run_selection_pipeline(research_dir: Path, output_dir: Path) -> Dict[str, An
     rejected.extend(submitted_rejected)
     queue = build_submit_queue([record for record in best if record.status == "best"])
 
-    _write_csv(output_dir / "candidate_alphas.csv", REGISTRY_FIELDS, [record.as_row() for record in records])
-    _write_csv(output_dir / "alpha_registry.csv", REGISTRY_FIELDS, [record.as_row() for record in records])
+    candidate_alphas_path = output_dir / "candidate_alphas.csv"
+    alpha_registry_path = output_dir / "alpha_registry.csv"
+    best_alphas_path = output_dir / "best_alphas.csv"
+    submit_queue_path = output_dir / "submit_queue.csv"
+    correlation_report_path = output_dir / "correlation_report.md"
+    final_recommendations_path = output_dir / "final_alpha_recommendations.md"
+
+    _write_csv(candidate_alphas_path, REGISTRY_FIELDS, [record.as_row() for record in records])
+    _write_csv(alpha_registry_path, REGISTRY_FIELDS, [record.as_row() for record in records])
     _write_json(output_dir / "alpha_fingerprints.json", {record.alpha_id: record.fingerprint for record in records + submitted})
     _write_json(output_dir / "alpha_family_memory.json", family_memory(records, clusters))
     _write_csv(output_dir / "alpha_correlation_matrix.csv", ["alpha_id"] + [record.alpha_id for record in records], correlation_matrix)
     _write_json(output_dir / "alpha_clusters.json", serialize_clusters(clusters))
-    _write_csv(output_dir / "best_alphas.csv", BEST_FIELDS, [record.as_row(include_cluster=True) for record in best])
+    _write_csv(best_alphas_path, BEST_FIELDS, [record.as_row(include_cluster=True) for record in best])
     _write_csv(output_dir / "rejected_high_corr_alphas.csv", REJECTED_FIELDS, [_rejected_row(record) for record in rejected])
-    _write_csv(output_dir / "submit_queue.csv", QUEUE_FIELDS, [_queue_row(record) for record in queue])
-    _write_report(output_dir / "correlation_report.md", records, submitted, clusters, best, rejected, queue)
-    _write_recommendations(output_dir / "final_alpha_recommendations.md", queue, submitted, rejected)
+    _write_csv(submit_queue_path, QUEUE_FIELDS, [_queue_row(record) for record in queue])
+    _write_report(correlation_report_path, records, submitted, clusters, best, rejected, queue)
+    _write_recommendations(final_recommendations_path, queue, submitted, rejected)
 
-    return {
+    report = {
         "record_count": len(records),
         "submitted_count": len(submitted),
         "cluster_count": len(clusters),
@@ -193,14 +207,28 @@ def run_selection_pipeline(research_dir: Path, output_dir: Path) -> Dict[str, An
         "rejected_high_corr_count": len(rejected),
         "submit_queue_count": len(queue),
         "outputs": {
-            "candidate_alphas": str(output_dir / "candidate_alphas.csv"),
-            "alpha_registry": str(output_dir / "alpha_registry.csv"),
-            "best_alphas": str(output_dir / "best_alphas.csv"),
-            "submit_queue": str(output_dir / "submit_queue.csv"),
-            "correlation_report": str(output_dir / "correlation_report.md"),
-            "final_recommendations": str(output_dir / "final_alpha_recommendations.md"),
+            "candidate_alphas": str(candidate_alphas_path),
+            "alpha_registry": str(alpha_registry_path),
+            "best_alphas": str(best_alphas_path),
+            "submit_queue": str(submit_queue_path),
+            "correlation_report": str(correlation_report_path),
+            "final_recommendations": str(final_recommendations_path),
         },
     }
+    if finalize:
+        final_state = build_final_selection_state(report, queue, rejected)
+        _write_json(paths.latest_final_selection_report, final_state)
+        _append_jsonl(paths.final_selection_reports_jsonl, [final_state])
+        report["finalized"] = True
+        report["final_state"] = str(paths.latest_final_selection_report)
+        report["final_state_log"] = str(paths.final_selection_reports_jsonl)
+    if clear_candidates:
+        if candidate_file is None:
+            raise ValueError("candidate_file is required when clear_candidates=True")
+        candidate_file.parent.mkdir(parents=True, exist_ok=True)
+        candidate_file.write_text("", encoding="utf-8")
+        report["candidates_cleared"] = str(candidate_file)
+    return report
 
 
 def load_passed_alpha_records(path: Path) -> List[AlphaRecord]:
@@ -769,6 +797,43 @@ def _write_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> Non
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def _append_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def build_final_selection_state(report: Dict[str, Any], queue: List[AlphaRecord], rejected: List[AlphaRecord]) -> Dict[str, Any]:
+    blocked = [
+        record for record in rejected
+        if record.status in {"rejected_submitted_corr", "rejected_economic_meaning"}
+    ]
+    next_action = {
+        "type": "submit_alpha" if queue else "continue_research",
+        "reason": "Submit the top queue entry." if queue else "No alpha passed the final submitted-correlation and economic-meaning gates.",
+    }
+    return {
+        "recorded_at": utc_now_iso(),
+        "decision": "submit_ready" if queue else "no_submit_candidate",
+        "next_action": next_action,
+        "summary": {
+            "record_count": report["record_count"],
+            "submitted_count": report["submitted_count"],
+            "cluster_count": report["cluster_count"],
+            "submit_queue_count": report["submit_queue_count"],
+            "rejected_high_corr_count": report["rejected_high_corr_count"],
+        },
+        "submit_queue": [_queue_row(record) for record in queue],
+        "blocked_best_candidates": [_rejected_row(record) for record in blocked],
+        "outputs": report.get("outputs", {}),
+        "retention_policy": {
+            "candidate_file": "May be cleared after finalization; it is only next-run input.",
+            "passed_alphas": "Keep as cumulative selection memory; do not auto-delete because future correlation and representative selection depend on it.",
+        },
+    }
 
 
 def _float(value: Any) -> Optional[float]:

@@ -24,3 +24,5 @@ Ignored local files:
 The app writes new artifacts into this layout by default. Legacy flat files in `research/` and archived files under `research/old/` are still readable as a fallback so old work is not stranded during migration.
 
 `python -m app select-alphas` uses `submissions/submitted_alphas.csv` as a final gate. A passed alpha can enter `outputs/best_alphas.csv` as a variant winner, but it will not enter `outputs/submit_queue.csv` if it is too similar to an already submitted alpha or if its expression no longer matches the hypothesis economic meaning.
+
+When a workflow round is complete, run `python -m app select-alphas --finalize-run --clear-candidates` to persist `state/latest_final_selection_report.json`, append `logs/final_selection_reports.jsonl`, and clear `data/candidates.jsonl` for the next design. Keep `logs/passed_alphas.csv`; it is cumulative selection memory, not disposable scratch output.

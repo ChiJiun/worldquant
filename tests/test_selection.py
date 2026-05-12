@@ -98,3 +98,35 @@ def test_selection_pipeline_rejects_hypothesis_meaning_drift(tmp_path):
     assert report["submit_queue_count"] == 0
     rejected = (output_dir / "rejected_high_corr_alphas.csv").read_text(encoding="utf-8")
     assert "hypothesis_economic_meaning_drift" in rejected
+
+
+def test_selection_pipeline_finalizes_state_and_can_clear_candidates(tmp_path):
+    research_dir = tmp_path / "research"
+    output_dir = tmp_path / "outputs"
+    candidate_file = tmp_path / "data" / "candidates.jsonl"
+    (research_dir / "logs").mkdir(parents=True)
+    candidate_file.parent.mkdir(parents=True)
+    candidate_file.write_text('{"candidate_id":"next","expression":"rank(close)"}\n', encoding="utf-8")
+    (research_dir / "logs" / "passed_alphas.csv").write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision",
+                '2026-05-10T00:00:00Z,A1,price_volume,"rank(returns) + rank(volume / adv20)",alpha-1,1.5,1.3,0.10,0.05,0.20,validate_best_candidate',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_selection_pipeline(
+        research_dir,
+        output_dir,
+        finalize=True,
+        candidate_file=candidate_file,
+        clear_candidates=True,
+    )
+
+    assert report["finalized"] is True
+    assert candidate_file.read_text(encoding="utf-8") == ""
+    assert (research_dir / "state" / "latest_final_selection_report.json").exists()
+    assert (research_dir / "logs" / "final_selection_reports.jsonl").exists()
