@@ -80,6 +80,8 @@ outputs/
 - `outputs/runs/<run_id>/summary.json`: 該次摘要。
 - `outputs/simulate_results.jsonl`: 跨 run 累積成功結果。
 - `outputs/simulate_errors.jsonl`: 跨 run 累積錯誤。
+- `outputs/final_alpha_recommendations.md`: selection gate 後的人類閱讀版最終建議報告。
+- `outputs/final_alpha_recommendations.example.md`: 可推上 GitHub 的 sanitized 報告範例。
 
 ```text
 research/
@@ -403,6 +405,8 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 - `outputs/final_alpha_recommendations.md`: 人類閱讀用報告，包含 expression、IS 表現、經濟意涵、OS/overfit 風險與 submitted correlation。
 
 `data/candidates.jsonl` 只是下一輪輸入，可以在 finalize 後清空。`research/logs/passed_alphas.csv` 不自動刪除，因為它是後續低相關性篩選和收益來源去重的累積候選池。
+
+實際運行產生的 `outputs/final_alpha_recommendations.md` 被 `.gitignore` 忽略，不會推到 GitHub；只追蹤 sanitized 範例 `outputs/final_alpha_recommendations.example.md`。
 
 ## 下一步
 

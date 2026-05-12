@@ -15,6 +15,7 @@ data/*
 outputs/*
 !outputs/README.md
 !outputs/simulate_results.example.jsonl
+!outputs/final_alpha_recommendations.example.md
 
 outputs_*/
 
