@@ -132,9 +132,11 @@ class RequestsBrainClient(BrainClient):
         return self.session.get(self.settings.api_base_url + path, timeout=self.settings.request_timeout_seconds)
 
     def _build_simulation_payload(self, candidate: AlphaCandidate) -> Dict[str, Any]:
+        settings_payload = self.settings.simulation_settings_payload()
+        settings_payload.update(_candidate_settings_override(candidate.metadata))
         return {
             "type": self.settings.simulation_type,
-            "settings": self.settings.simulation_settings_payload(),
+            "settings": settings_payload,
             "regular": candidate.expression,
         }
 
@@ -238,3 +240,31 @@ def build_client(settings: Settings, rate_limiter: RateLimiter) -> BrainClient:
     if mode == "requests":
         return RequestsBrainClient(settings, rate_limiter)
     raise ValueError(f"Unknown client mode: {settings.client_mode}. Use requests or mock.")
+
+
+def _candidate_settings_override(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    raw = metadata.get("simulation_settings") or metadata.get("settings") or {}
+    if not isinstance(raw, dict):
+        return {}
+    aliases = {
+        "instrument_type": "instrumentType",
+        "instrumentType": "instrumentType",
+        "region": "region",
+        "universe": "universe",
+        "language": "language",
+        "decay": "decay",
+        "delay": "delay",
+        "truncation": "truncation",
+        "neutralization": "neutralization",
+        "pasteurization": "pasteurization",
+        "lookback": "lookback",
+        "max_trade": "maxTrade",
+        "maxTrade": "maxTrade",
+        "max_position": "maxPosition",
+        "maxPosition": "maxPosition",
+    }
+    return {
+        aliases[key]: value
+        for key, value in raw.items()
+        if key in aliases and value is not None
+    }

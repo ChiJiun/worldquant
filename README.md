@@ -262,6 +262,53 @@ C:\Users\USER\anaconda3\python.exe -m app simulate --expression "rank(close)" --
 C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1
 ```
 
+策略型 simulation settings 不建議寫在 `.env`。`.env` 只放帳密、API、timeout、路徑等執行環境；Instrument Type、Region、Universe、Language、Decay、Delay、Truncation、Neutralization、Pasteurization、Lookback、Max Trade、Max Position 由 LLM 依策略在每次實驗指定。
+
+最推薦寫在 `data/candidates.jsonl` 的 candidate metadata，讓公式和設定一起被保存：
+
+```json
+{
+  "candidate_id": "A_settings_001",
+  "family": "cashflow_quality",
+  "expression": "rank(cashflow / assets)",
+  "changed_dimension": "truncation_0.08_to_0.05",
+  "simulation_settings": {
+    "instrument_type": "EQUITY",
+    "region": "USA",
+    "universe": "TOP3000",
+    "language": "FASTEXPR",
+    "decay": 0,
+    "delay": 1,
+    "truncation": 0.05,
+    "neutralization": "INDUSTRY",
+    "pasteurization": "ON",
+    "lookback": 0,
+    "max_trade": "OFF",
+    "max_position": "OFF"
+  }
+}
+```
+
+也可以用單次 command 覆蓋，不需要改 `.env`：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run `
+  --instrument-type EQUITY `
+  --region USA `
+  --universe TOP3000 `
+  --language FASTEXPR `
+  --decay 0 `
+  --delay 1 `
+  --truncation 0.08 `
+  --neutralization INDUSTRY `
+  --pasteurization ON `
+  --lookback 0 `
+  --max-trade OFF `
+  --max-position OFF
+```
+
+LLM researcher 可以把 simulation setting 當成實驗維度，但一輪只能改一個維度。若本輪改的是 setting，例如 `truncation 0.08 -> 0.05` 或 `delay 1 -> 0`，`data/candidates.jsonl` 的 `changed_dimension` 和 `notes` 必須清楚寫出來，避免和 formula change 混在一起。
+
 讀單一 alpha / result：
 
 ```powershell

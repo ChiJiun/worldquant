@@ -46,3 +46,46 @@ def test_research_mode_reports_requested_loop(settings, monkeypatch, capsys):
     assert payload["requested_mode"] == "pass-alpha-improvement"
     assert payload["active_mode"] == "pass_alpha_improvement_loop"
     assert payload["suggested_next_action"]["type"] in {"test_formula", "validate_checks"}
+
+
+def test_simulate_accepts_per_run_setting_overrides(settings, monkeypatch):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    settings.ensure_directories()
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A1","family":"manual","expression":"rank(close)"}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main([
+        "simulate",
+        "--limit",
+        "1",
+        "--current-run",
+        "--universe",
+        "TOP1000",
+        "--delay",
+        "0",
+        "--decay",
+        "3",
+        "--truncation",
+        "0.05",
+        "--neutralization",
+        "MARKET",
+        "--lookback",
+        "252",
+        "--max-trade",
+        "ON",
+        "--max-position",
+        "OFF",
+    ])
+
+    assert exit_code == 0
+    summary = json.loads((settings.output_dir / "current_run" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["settings"]["universe"] == "TOP1000"
+    assert summary["settings"]["delay"] == 0
+    assert summary["settings"]["decay"] == 3
+    assert summary["settings"]["truncation"] == 0.05
+    assert summary["settings"]["neutralization"] == "MARKET"
+    assert summary["settings"]["lookback"] == 252
+    assert summary["settings"]["maxTrade"] == "ON"
+    assert summary["settings"]["maxPosition"] == "OFF"

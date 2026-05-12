@@ -48,6 +48,9 @@ class Settings:
     neutralization: str
     truncation: float
     pasteurization: str
+    lookback: int
+    max_trade: str
+    max_position: str
     unit_handling: str
     nan_handling: str
     language: str
@@ -86,6 +89,9 @@ class Settings:
             neutralization=os.getenv("WQ_NEUTRALIZATION", "INDUSTRY"),
             truncation=float(os.getenv("WQ_TRUNCATION", "0.08")),
             pasteurization=os.getenv("WQ_PASTEURIZATION", "ON"),
+            lookback=int(os.getenv("WQ_LOOKBACK", "0")),
+            max_trade=os.getenv("WQ_MAX_TRADE", "OFF"),
+            max_position=os.getenv("WQ_MAX_POSITION", "OFF"),
             unit_handling=os.getenv("WQ_UNIT_HANDLING", "VERIFY"),
             nan_handling=os.getenv("WQ_NAN_HANDLING", "OFF"),
             language=os.getenv("WQ_LANGUAGE", "FASTEXPR"),
@@ -114,6 +120,9 @@ class Settings:
             "neutralization": self.neutralization,
             "truncation": self.truncation,
             "pasteurization": self.pasteurization,
+            "lookback": self.lookback,
+            "maxTrade": self.max_trade,
+            "maxPosition": self.max_position,
             "unitHandling": self.unit_handling,
             "nanHandling": self.nan_handling,
             "language": self.language,

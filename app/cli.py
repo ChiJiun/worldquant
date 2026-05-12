@@ -29,6 +29,18 @@ def make_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--family", default="manual", help="Family name for --expression")
     simulate.add_argument("--candidate-id", default="", help="Candidate id for --expression")
     simulate.add_argument("--current-run", action="store_true", help="Overwrite outputs/current_run instead of creating outputs/runs/<run_id>")
+    simulate.add_argument("--instrument-type", default=None, help="Override BRAIN instrumentType for this simulation")
+    simulate.add_argument("--region", default=None, help="Override BRAIN region for this simulation")
+    simulate.add_argument("--universe", default=None, help="Override BRAIN universe for this simulation")
+    simulate.add_argument("--language", default=None, help="Override BRAIN expression language for this simulation")
+    simulate.add_argument("--decay", type=int, default=None, help="Override BRAIN decay for this simulation")
+    simulate.add_argument("--delay", type=int, default=None, help="Override BRAIN delay for this simulation")
+    simulate.add_argument("--truncation", type=float, default=None, help="Override BRAIN truncation for this simulation")
+    simulate.add_argument("--neutralization", default=None, help="Override BRAIN neutralization for this simulation")
+    simulate.add_argument("--pasteurization", default=None, help="Override BRAIN pasteurization for this simulation")
+    simulate.add_argument("--lookback", type=int, default=None, help="Override BRAIN lookback for this simulation")
+    simulate.add_argument("--max-trade", default=None, help="Override BRAIN maxTrade for this simulation")
+    simulate.add_argument("--max-position", default=None, help="Override BRAIN maxPosition for this simulation")
 
     result = subparsers.add_parser("result", help="Fetch one result/alpha by id and print metrics JSON")
     result.add_argument("result_id")
@@ -97,6 +109,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "simulate":
+        _apply_simulation_overrides(settings, args)
         if args.expression:
             candidate = AlphaCandidate(
                 candidate_id=args.candidate_id,
@@ -156,6 +169,26 @@ def _print_settings(settings: Settings) -> None:
     }
     for key, value in rows.items():
         print(f"{key}={value}")
+
+
+def _apply_simulation_overrides(settings: Settings, args: argparse.Namespace) -> None:
+    overrides = {
+        "instrument_type": args.instrument_type,
+        "region": args.region,
+        "universe": args.universe,
+        "language": args.language,
+        "decay": args.decay,
+        "delay": args.delay,
+        "truncation": args.truncation,
+        "neutralization": args.neutralization,
+        "pasteurization": args.pasteurization,
+        "lookback": args.lookback,
+        "max_trade": args.max_trade,
+        "max_position": args.max_position,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            setattr(settings, key, value)
 
 
 def render_metrics_payload(payload: dict) -> str:

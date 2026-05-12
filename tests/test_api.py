@@ -51,6 +51,38 @@ def test_requests_client_builds_worldquant_simulation_payload(settings):
     assert payload["settings"]["region"] == "USA"
 
 
+def test_requests_client_applies_candidate_simulation_settings(settings):
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    candidate = AlphaCandidate(
+        candidate_id="A_settings",
+        family="settings",
+        expression="rank(close)",
+        metadata={
+            "simulation_settings": {
+                "universe": "TOP1000",
+                "delay": 0,
+                "decay": 3,
+                "truncation": 0.05,
+                "neutralization": "MARKET",
+                "lookback": 252,
+                "max_trade": "ON",
+                "maxPosition": "OFF",
+            }
+        },
+    )
+
+    payload = client._build_simulation_payload(candidate)
+
+    assert payload["settings"]["universe"] == "TOP1000"
+    assert payload["settings"]["delay"] == 0
+    assert payload["settings"]["decay"] == 3
+    assert payload["settings"]["truncation"] == 0.05
+    assert payload["settings"]["neutralization"] == "MARKET"
+    assert payload["settings"]["lookback"] == 252
+    assert payload["settings"]["maxTrade"] == "ON"
+    assert payload["settings"]["maxPosition"] == "OFF"
+
+
 def test_requests_client_fetch_result_parses_alpha_metrics(settings):
     client = RequestsBrainClient(settings, RateLimiter(0.0))
     client.logged_in = True

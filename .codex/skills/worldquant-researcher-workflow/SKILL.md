@@ -91,6 +91,7 @@ Perform one loop at a time.
 3. For alpha design, obey hard constraints:
    - Output exactly one alpha.
    - Change only one design dimension from the parent.
+   - A simulation setting override counts as a design dimension. Do not change formula and settings in the same experiment unless the user explicitly asks.
    - Preserve the family mechanism.
    - Use only supported fields/operators from `config/fields.json`.
    - Do not copy public formulas directly.
@@ -111,6 +112,68 @@ Perform one loop at a time.
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run
 ```
+
+Strategy/simulation settings should not be stored in `.env`. `.env` is for credentials, API paths, timeouts, and local paths. The LLM should choose strategy settings per candidate or per run.
+
+Preferred candidate-level form:
+
+```json
+{
+  "candidate_id": "A_settings_001",
+  "family": "cashflow_quality",
+  "expression": "rank(cashflow / assets)",
+  "changed_dimension": "truncation_0.08_to_0.05",
+  "simulation_settings": {
+    "instrument_type": "EQUITY",
+    "region": "USA",
+    "universe": "TOP3000",
+    "language": "FASTEXPR",
+    "decay": 0,
+    "delay": 1,
+    "truncation": 0.05,
+    "neutralization": "INDUSTRY",
+    "pasteurization": "ON",
+    "lookback": 0,
+    "max_trade": "OFF",
+    "max_position": "OFF"
+  }
+}
+```
+
+The LLM may also choose per-run BRAIN settings when that is the single tested dimension:
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run `
+  --instrument-type EQUITY `
+  --region USA `
+  --universe TOP3000 `
+  --language FASTEXPR `
+  --decay 0 `
+  --delay 1 `
+  --truncation 0.08 `
+  --neutralization INDUSTRY `
+  --pasteurization ON `
+  --lookback 0 `
+  --max-trade OFF `
+  --max-position OFF
+```
+
+Supported per-run setting dimensions:
+
+- Instrument Type: `--instrument-type`
+- Region: `--region`
+- Universe: `--universe`
+- Language: `--language`
+- Decay: `--decay`
+- Delay: `--delay`
+- Truncation: `--truncation`
+- Neutralization: `--neutralization`
+- Pasteurization: `--pasteurization`
+- Lookback: `--lookback`
+- Max Trade: `--max-trade`
+- Max Position: `--max-position`
+
+If a setting is overridden, include it in `changed_dimension` and `notes` in `data/candidates.jsonl`.
 
 6. Read new artifacts from `outputs/current_run/` and `research/`.
 
