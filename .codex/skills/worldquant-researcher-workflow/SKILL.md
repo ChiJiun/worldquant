@@ -121,6 +121,12 @@ C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run
    - `stop_family`
    - `promote_template`
 
+8. Before recommending submission, run the selection gate:
+   - select the best representative inside each high-correlation variant cluster
+   - verify the candidate still preserves the family/hypothesis economic meaning
+   - compare against `research/submissions/submitted_alphas.csv`
+   - only use `outputs/submit_queue.csv` as the recommended submission list
+
 ## Artifact Discipline
 
 Do not create a new file or directory for every research step.
@@ -135,6 +141,8 @@ Use these fixed files/directories:
 - `research/logs/experiment_decisions.jsonl`: append decisions.
 - `research/logs/passed_alphas.csv` and `research/logs/failed_alphas.csv`: append candidate classification.
 - `research/state/best_alphas.txt`: overwrite best summary.
+- `research/submissions/submitted_alphas.csv`: local submitted-alpha registry used to block high-correlation resubmissions.
+- `outputs/submit_queue.csv`: final recommended submission queue after variant, economic-meaning, and submitted-correlation gates.
 
 Do not create ad hoc Markdown reports, extra analysis files, new prompt files, or per-round notes unless the user explicitly asks.
 

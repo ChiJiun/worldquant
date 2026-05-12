@@ -34,6 +34,7 @@ LLM researcher
 4. 程式寫入 `outputs/current_run/`、`outputs/simulate_results.jsonl` 或 `outputs/simulate_errors.jsonl`。
 5. recorder 更新 `research/state/family_memory.json`、`research/logs/experiment_decisions.jsonl`、`passed_alphas.csv` 或 `failed_alphas.csv`。
 6. 若 candidate 接近提交門檻，先跑 validation；若有多個可用 alpha，再跑 selection 做低相關性篩選。
+7. selection 會先在同一變體/同收益來源 cluster 中選 best，再排除與 `research/submissions/submitted_alphas.csv` 高相關的 alpha，最後才寫入 `outputs/submit_queue.csv`。
 
 ## 目錄
 
@@ -330,6 +331,16 @@ workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針�
 ---
 
 指標記得要幫我做相關性聚類的最優篩選，還要考慮在OS會不會是全域最優，不要在IS overfit，在portolio的檔案用來保存最佳因子
+
+### Submit Queue Gate
+
+`python -m app select-alphas` 不是單純排序 passed alpha。它會做三層 gate：
+
+1. **變體內選 best**：同 parent、同 family、同 core signal/direction 或結構相似度高的 alpha 會被分在同一 cluster，只保留 quality score 最高者。
+2. **經濟意涵檢查**：candidate 的 expression fingerprint 必須和 family/hypothesis 的 core signal 一致；例如 news hypothesis 不應最後變成純 return-reversal。
+3. **已提交相關性檢查**：cluster winner 仍要和 `research/submissions/submitted_alphas.csv` 比對；如果和已提交 alpha 的結構/metric proxy similarity >= 0.85，就不進 `outputs/submit_queue.csv`。
+
+不同 hypothesis 若其實使用同一組 field/operator、同一 direction，或被判定為同一 `core_signal`，也會被視為相同或相似收益來源，進同一 correlation cluster 競爭代表 alpha。
 
 ## 下一步
 

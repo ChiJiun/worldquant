@@ -22,3 +22,5 @@ Ignored local files:
 - `notes/hypotheses.md`: working research notes, unless manually sanitized and moved into docs.
 
 The app writes new artifacts into this layout by default. Legacy flat files in `research/` and archived files under `research/old/` are still readable as a fallback so old work is not stranded during migration.
+
+`python -m app select-alphas` uses `submissions/submitted_alphas.csv` as a final gate. A passed alpha can enter `outputs/best_alphas.csv` as a variant winner, but it will not enter `outputs/submit_queue.csv` if it is too similar to an already submitted alpha or if its expression no longer matches the hypothesis economic meaning.

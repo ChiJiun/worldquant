@@ -42,6 +42,7 @@ REGISTRY_FIELDS = [
 REJECTED_FIELDS = REGISTRY_FIELDS + ["cluster_id", "replaced_by", "reject_reason"]
 BEST_FIELDS = REGISTRY_FIELDS + ["cluster_id"]
 QUEUE_FIELDS = BEST_FIELDS + ["submit_score"]
+CORRELATION_THRESHOLD = 0.85
 
 KNOWN_FIELDS = [
     "adv20",
@@ -122,6 +123,7 @@ class AlphaRecord:
     replaced_by: str = ""
     reject_reason: str = ""
     fingerprint: Dict[str, Any] = field(default_factory=dict)
+    economic_meaning_status: str = "unchecked"
 
     def as_row(self, include_cluster: bool = False) -> Dict[str, Any]:
         row = {
@@ -156,44 +158,47 @@ class AlphaRecord:
 def run_selection_pipeline(research_dir: Path, output_dir: Path) -> Dict[str, Any]:
     paths = research_paths(research_dir)
     records = load_passed_alpha_records(existing_or_new(paths.passed_alphas, research_dir / "passed_alphas.csv", research_dir / "old" / "passed_alphas.csv"))
+    submitted = load_submitted_alpha_records(existing_or_new(paths.submitted_alphas, research_dir / "submitted_alphas.csv", research_dir / "old" / "submitted_alphas.csv"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for record in records:
-        record.fingerprint = build_fingerprint(record.expression, record.family, record.parent_alpha_id)
-        record.core_signal = str(record.fingerprint["core_signal"])
-        record.fields = list(record.fingerprint["fields"])
-        record.operators = list(record.fingerprint["operators"])
-        record.lookbacks = list(record.fingerprint["lookbacks"])
-        record.direction = str(record.fingerprint["direction"])
-        record.quality_score = quality_score(record)
+    for record in records + submitted:
+        populate_fingerprint(record)
 
     edges, correlation_matrix = detect_correlation_edges(records)
     clusters = connected_components(records, edges)
     best, rejected = select_cluster_representatives(clusters)
-    queue = build_submit_queue(best)
+    meaning_rejected = reject_economic_meaning_drift(best)
+    submitted_rejected = reject_submitted_correlations(best, submitted)
+    rejected.extend(meaning_rejected)
+    rejected.extend(submitted_rejected)
+    queue = build_submit_queue([record for record in best if record.status == "best"])
 
     _write_csv(output_dir / "candidate_alphas.csv", REGISTRY_FIELDS, [record.as_row() for record in records])
     _write_csv(output_dir / "alpha_registry.csv", REGISTRY_FIELDS, [record.as_row() for record in records])
-    _write_json(output_dir / "alpha_fingerprints.json", {record.alpha_id: record.fingerprint for record in records})
+    _write_json(output_dir / "alpha_fingerprints.json", {record.alpha_id: record.fingerprint for record in records + submitted})
     _write_json(output_dir / "alpha_family_memory.json", family_memory(records, clusters))
     _write_csv(output_dir / "alpha_correlation_matrix.csv", ["alpha_id"] + [record.alpha_id for record in records], correlation_matrix)
     _write_json(output_dir / "alpha_clusters.json", serialize_clusters(clusters))
     _write_csv(output_dir / "best_alphas.csv", BEST_FIELDS, [record.as_row(include_cluster=True) for record in best])
     _write_csv(output_dir / "rejected_high_corr_alphas.csv", REJECTED_FIELDS, [_rejected_row(record) for record in rejected])
     _write_csv(output_dir / "submit_queue.csv", QUEUE_FIELDS, [_queue_row(record) for record in queue])
-    _write_report(output_dir / "correlation_report.md", records, clusters, best, rejected)
+    _write_report(output_dir / "correlation_report.md", records, submitted, clusters, best, rejected, queue)
+    _write_recommendations(output_dir / "final_alpha_recommendations.md", queue, submitted, rejected)
 
     return {
         "record_count": len(records),
+        "submitted_count": len(submitted),
         "cluster_count": len(clusters),
         "best_count": len(best),
         "rejected_high_corr_count": len(rejected),
+        "submit_queue_count": len(queue),
         "outputs": {
             "candidate_alphas": str(output_dir / "candidate_alphas.csv"),
             "alpha_registry": str(output_dir / "alpha_registry.csv"),
             "best_alphas": str(output_dir / "best_alphas.csv"),
             "submit_queue": str(output_dir / "submit_queue.csv"),
             "correlation_report": str(output_dir / "correlation_report.md"),
+            "final_recommendations": str(output_dir / "final_alpha_recommendations.md"),
         },
     }
 
@@ -230,6 +235,50 @@ def load_passed_alpha_records(path: Path) -> List[AlphaRecord]:
             record.quality_score = quality_score(record)
             records.append(record)
     return records
+
+
+def load_submitted_alpha_records(path: Path) -> List[AlphaRecord]:
+    if not path.exists():
+        return []
+    records: List[AlphaRecord] = []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            expression = str(row.get("expression") or row.get("regular") or "").strip()
+            alpha_id = str(row.get("alpha_id") or row.get("result_id") or row.get("candidate_id") or "").strip()
+            if not expression or not alpha_id:
+                continue
+            record = AlphaRecord(
+                alpha_id=alpha_id,
+                candidate_id=str(row.get("candidate_id") or alpha_id),
+                expression=expression,
+                parent_alpha_id=str(row.get("parent_alpha_id") or ""),
+                workflow_type="submitted",
+                family=str(row.get("family") or "submitted"),
+                core_signal="unknown",
+                fields=[],
+                operators=[],
+                lookbacks=[],
+                direction="unknown",
+                sharpe=_float(row.get("sharpe")),
+                fitness=_float(row.get("fitness")),
+                returns=_float(row.get("returns")),
+                turnover=_float(row.get("turnover")),
+                drawdown=_float(row.get("drawdown")),
+                status="submitted",
+            )
+            records.append(record)
+    return records
+
+
+def populate_fingerprint(record: AlphaRecord) -> None:
+    record.fingerprint = build_fingerprint(record.expression, record.family, record.parent_alpha_id)
+    record.core_signal = str(record.fingerprint["core_signal"])
+    record.fields = list(record.fingerprint["fields"])
+    record.operators = list(record.fingerprint["operators"])
+    record.lookbacks = list(record.fingerprint["lookbacks"])
+    record.direction = str(record.fingerprint["direction"])
+    record.economic_meaning_status = economic_meaning_status(record)
+    record.quality_score = quality_score(record)
 
 
 def build_fingerprint(expression: str, family: str = "", parent_alpha_id: str = "") -> Dict[str, Any]:
@@ -269,8 +318,9 @@ def detect_correlation_edges(records: List[AlphaRecord]) -> Tuple[List[Tuple[str
         metric_corr = metric_similarity(left, right)
         score_lookup[(left.alpha_id, right.alpha_id)] = max(structural, metric_corr)
         score_lookup[(right.alpha_id, left.alpha_id)] = max(structural, metric_corr)
-        if structural >= 0.85:
-            edges.append((left.alpha_id, right.alpha_id, "structural_high"))
+        score = max(structural, metric_corr)
+        if score >= CORRELATION_THRESHOLD:
+            edges.append((left.alpha_id, right.alpha_id, correlation_reason(left, right, structural, metric_corr)))
 
     matrix_rows: List[Dict[str, Any]] = []
     for left in records:
@@ -290,6 +340,18 @@ def structural_similarity(left: AlphaRecord, right: AlphaRecord) -> float:
     operator_score = _jaccard(set(left.operators), set(right.operators))
     family_bonus = 0.2 if left.family == right.family else 0.0
     return min(1.0, 0.55 * field_score + 0.35 * operator_score + family_bonus)
+
+
+def correlation_reason(left: AlphaRecord, right: AlphaRecord, structural: float, metric_corr: float) -> str:
+    if left.core_signal == right.core_signal and left.direction == right.direction and left.family != right.family:
+        return "same_return_source_cross_hypothesis"
+    if left.parent_alpha_id and left.parent_alpha_id == right.parent_alpha_id:
+        return "same_variant_family"
+    if structural >= CORRELATION_THRESHOLD:
+        return "structural_high"
+    if metric_corr >= CORRELATION_THRESHOLD:
+        return "metric_proxy_high"
+    return "correlation_high"
 
 
 def metric_similarity(left: AlphaRecord, right: AlphaRecord) -> float:
@@ -351,6 +413,48 @@ def select_cluster_representatives(clusters: List[List[AlphaRecord]]) -> Tuple[L
     return best, rejected
 
 
+def reject_economic_meaning_drift(best: List[AlphaRecord]) -> List[AlphaRecord]:
+    rejected: List[AlphaRecord] = []
+    for record in best:
+        if record.economic_meaning_status != "consistent":
+            record.status = "rejected_economic_meaning"
+            record.reject_reason = record.economic_meaning_status
+            rejected.append(record)
+    return rejected
+
+
+def reject_submitted_correlations(best: List[AlphaRecord], submitted: List[AlphaRecord]) -> List[AlphaRecord]:
+    rejected: List[AlphaRecord] = []
+    if not submitted:
+        return rejected
+    for record in best:
+        if record.status != "best":
+            continue
+        match = best_submitted_match(record, submitted)
+        if match is None:
+            continue
+        submitted_record, score, reason = match
+        if score < CORRELATION_THRESHOLD:
+            continue
+        record.status = "rejected_submitted_corr"
+        record.replaced_by = submitted_record.alpha_id
+        record.reject_reason = f"high_corr_with_submitted_alpha:{reason}:{score:.4f}"
+        rejected.append(record)
+    return rejected
+
+
+def best_submitted_match(record: AlphaRecord, submitted: List[AlphaRecord]) -> Optional[Tuple[AlphaRecord, float, str]]:
+    best_match: Optional[Tuple[AlphaRecord, float, str]] = None
+    for submitted_record in submitted:
+        structural = structural_similarity(record, submitted_record)
+        metric_corr = metric_similarity(record, submitted_record)
+        score = max(structural, metric_corr)
+        reason = correlation_reason(record, submitted_record, structural, metric_corr)
+        if best_match is None or score > best_match[1]:
+            best_match = (submitted_record, score, reason)
+    return best_match
+
+
 def build_submit_queue(best: List[AlphaRecord]) -> List[AlphaRecord]:
     family_counts: Dict[str, int] = defaultdict(int)
     queue: List[AlphaRecord] = []
@@ -410,15 +514,17 @@ def _queue_row(record: AlphaRecord) -> Dict[str, Any]:
     return row
 
 
-def _write_report(path: Path, records: List[AlphaRecord], clusters: List[List[AlphaRecord]], best: List[AlphaRecord], rejected: List[AlphaRecord]) -> None:
+def _write_report(path: Path, records: List[AlphaRecord], submitted: List[AlphaRecord], clusters: List[List[AlphaRecord]], best: List[AlphaRecord], rejected: List[AlphaRecord], queue: List[AlphaRecord]) -> None:
     lines = [
         "# Correlation Report",
         "",
         f"- generated_at: {utc_now_iso()}",
         f"- alpha_count: {len(records)}",
+        f"- submitted_alpha_count: {len(submitted)}",
         f"- cluster_count: {len(clusters)}",
         f"- best_count: {len(best)}",
         f"- rejected_high_corr_count: {len(rejected)}",
+        f"- submit_queue_count: {len(queue)}",
         "",
         "## Clusters",
         "",
@@ -427,9 +533,118 @@ def _write_report(path: Path, records: List[AlphaRecord], clusters: List[List[Al
         winner = max(cluster, key=lambda record: record.quality_score)
         lines.append(f"### {winner.cluster_id} winner={winner.alpha_id} quality={winner.quality_score:g}")
         for record in cluster:
-            lines.append(f"- {record.alpha_id} `{record.family}` quality={record.quality_score:g} status={record.status}")
+            lines.append(f"- {record.alpha_id} `{record.family}` source={record.core_signal}/{record.direction} quality={record.quality_score:g} status={record.status}")
+        lines.append("")
+    if rejected:
+        lines.extend(["## Rejected", ""])
+        for record in rejected:
+            lines.append(f"- {record.alpha_id} status={record.status} replaced_by={record.replaced_by} reason={record.reject_reason}")
+        lines.append("")
+    if queue:
+        lines.extend(["## Submit Queue", ""])
+        for record in queue:
+            lines.append(f"- {record.alpha_id} `{record.family}` source={record.core_signal}/{record.direction} submit_score={getattr(record, 'submit_score', record.quality_score):g}")
         lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_recommendations(path: Path, queue: List[AlphaRecord], submitted: List[AlphaRecord], rejected: List[AlphaRecord]) -> None:
+    lines = [
+        "# Final Alpha Recommendations",
+        "",
+        f"- generated_at: {utc_now_iso()}",
+        f"- recommended_count: {len(queue)}",
+        f"- submitted_registry_count: {len(submitted)}",
+        "",
+    ]
+    if not queue:
+        lines.extend([
+            "No alpha passed all submit queue gates.",
+            "",
+            "The candidate may still appear in `outputs/best_alphas.csv`, but it was blocked by economic-meaning or submitted-correlation checks.",
+            "",
+        ])
+        blocked = [
+            record for record in rejected
+            if record.status in {"rejected_submitted_corr", "rejected_economic_meaning"}
+        ]
+        if blocked:
+            lines.extend(["## Blocked Best Candidates", ""])
+            for record in blocked:
+                lines.extend(recommendation_block(record, submitted, blocked=True))
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return
+
+    for index, record in enumerate(queue, start=1):
+        lines.extend([f"## {index}. {record.alpha_id}", ""])
+        lines.extend(recommendation_block(record, submitted, blocked=False))
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def recommendation_block(record: AlphaRecord, submitted: List[AlphaRecord], *, blocked: bool) -> List[str]:
+    match = best_submitted_match(record, submitted)
+    match_text = "No submitted alpha registry available."
+    if match is not None:
+        submitted_record, score, reason = match
+        match_text = f"Best submitted match `{submitted_record.alpha_id}` score={score:.4f}, reason={reason}."
+    status_line = f"- status: `{record.status}`"
+    if blocked:
+        status_line += f" reason=`{record.reject_reason}`"
+    return [
+        status_line,
+        f"- candidate_id: `{record.candidate_id}`",
+        f"- family: `{record.family}`",
+        f"- cluster_id: `{record.cluster_id}`",
+        f"- core_signal: `{record.core_signal}`",
+        f"- direction: `{record.direction}`",
+        f"- submit_score: `{_format_number(getattr(record, 'submit_score', record.quality_score))}`",
+        f"- IS Sharpe: `{_format_number(record.sharpe)}`",
+        f"- IS Fitness: `{_format_number(record.fitness)}`",
+        f"- IS Returns: `{_format_number(record.returns)}`",
+        f"- IS Turnover: `{_format_number(record.turnover)}`",
+        f"- IS Drawdown: `{_format_number(record.drawdown)}`",
+        f"- economic_meaning: {economic_meaning_description(record)}",
+        f"- selection_reason: {selection_reason(record)}",
+        f"- OS_overfit_risk: {os_overfit_risk(record)}",
+        f"- submitted_correlation: {match_text}",
+        "",
+        "```text",
+        record.expression,
+        "```",
+        "",
+    ]
+
+
+def economic_meaning_description(record: AlphaRecord) -> str:
+    return {
+        "analyst_revision": "Analyst estimate/revision information is used as an observable proxy for changing expectations.",
+        "social_sentiment": "Social sentiment is used as an observable proxy for investor attention or crowd sentiment.",
+        "research_sentiment": "Research sentiment is used as an observable proxy for analyst/research tone.",
+        "model_revision_score": "Model/analyst revision fields are used as a proxy for improving or deteriorating expectations.",
+        "news_event_response": "News/event fields are used as a proxy for delayed reaction to firm-specific information.",
+        "option_implied_expectation": "Option/implied expectation fields are used as a proxy for forward-looking risk or demand.",
+        "fundamental_value_quality": "Fundamental ratios are used as a proxy for value, quality, or capital efficiency.",
+        "price_volume_flow": "Price/volume interaction is used as a proxy for liquidity-adjusted flow or demand pressure.",
+        "return_reversal": "Return history is used as a proxy for mean reversion after overextension.",
+    }.get(record.core_signal, "Economic source is inferred as unknown; review the expression before submission.")
+
+
+def selection_reason(record: AlphaRecord) -> str:
+    return (
+        "Selected as the best representative of its high-correlation cluster after quality scoring, "
+        "economic-meaning consistency check, and submitted-alpha correlation gate."
+    )
+
+
+def os_overfit_risk(record: AlphaRecord) -> str:
+    blocking_statuses = {record.self_corr_status, record.sub_universe_status, record.weight_concentration_status}
+    if "fail" in blocking_statuses:
+        return "high: at least one validation status is failed; do not submit without clearing it."
+    if "pending" in blocking_statuses or "unknown" in blocking_statuses:
+        return "medium: recommendation is based on IS metrics plus structural gates; require live OS/self-correlation review."
+    if record.drawdown is not None and record.drawdown > 0.10:
+        return "medium: validation statuses are available, but drawdown is elevated."
+    return "lower: available validation statuses are not blocking, but OS performance still needs final platform review."
 
 
 def _extract_known_tokens(expression: str, known: List[str]) -> List[str]:
@@ -477,6 +692,16 @@ def _infer_core_signal(fields: List[str], family: str, expression: str) -> str:
     if "returns" in fields:
         return "return_reversal"
     return "unknown"
+
+
+def economic_meaning_status(record: AlphaRecord) -> str:
+    family_signal = _infer_core_signal([], record.family, "")
+    expression_signal = _infer_core_signal(record.fields, "", record.expression)
+    if family_signal == "unknown" or expression_signal == "unknown":
+        return "consistent"
+    if family_signal != expression_signal:
+        return f"hypothesis_economic_meaning_drift:{family_signal}->{expression_signal}"
+    return "consistent"
 
 
 def _infer_direction(expression: str) -> str:
