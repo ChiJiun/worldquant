@@ -234,3 +234,11 @@ The next engineering milestone is:
 1. stabilize live `python -m app simulate`
 2. improve timeout and error classification
 3. add operator-aware one-action planning
+
+## Related Files
+
+- `docs/research-policy.md`: mode definitions, policies, failure taxonomy and the reflection JSON shared by both agent skills.
+- `.claude/skills/worldquant-researcher-workflow/SKILL.md`: the Claude Code skill (`/worldquant-researcher-workflow [mode]`).
+- `.codex/skills/worldquant-researcher-workflow/SKILL.md`: the Codex skill (`$worldquant-researcher-workflow [mode]`).
+- `CLAUDE.md`: repo-level guidance for Claude Code (safety rules, commands, which docs to keep in sync).
+- `docs/researcher-prompt.md`: the full researcher prompt handed to the LLM.

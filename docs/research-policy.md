@@ -1,5 +1,8 @@
 # Research Policy
 
+Shared by the Claude Code skill (`.claude/skills/worldquant-researcher-workflow/SKILL.md`) and the Codex skill
+(`.codex/skills/worldquant-researcher-workflow/SKILL.md`). Edit the policy here, not inside either skill.
+
 ## Modes
 
 `literature_scout`
@@ -60,7 +63,7 @@ Workflow completion:
 - Do not treat a normal simulation result as completion.
 - Continue researching until a submit-worthy alpha is found, a family stop rule triggers, the user stops the run, or a per-invocation safety limit is reached.
 - Use fixed artifact paths and avoid per-round report files.
-- Store reusable lessons inside `research/family_memory.json`; do not create separate lesson files unless requested.
+- Store reusable lessons inside `research/state/family_memory.json`; do not create separate lesson files unless requested.
 
 ## Failure Taxonomy
 

@@ -21,7 +21,7 @@ LLM researcher
 
 這個 repo 把研究判斷和 deterministic IO 分開：
 
-- LLM/Codex 負責：找市場機制、建立假說、設計一條 alpha、一次只改一個變因、讀結果、歸因 bottleneck、更新下一步。
+- LLM agent（Claude Code 或 Codex）負責：找市場機制、建立假說、設計一條 alpha、一次只改一個變因、讀結果、歸因 bottleneck、更新下一步。
 - Python 程式負責：讀 candidate、登入 BRAIN、送 simulate、poll、抓 result、解析 metrics、寫 artifacts。
 - `research/` 負責保存本機研究狀態；GitHub 只追蹤說明、schema、failure taxonomy，不追蹤實驗流水帳和 alpha 狀態。
 - `outputs/` 是程式輸出，不手寫；`data/` 是人工或 LLM 準備輸入的地方。
@@ -35,7 +35,7 @@ LLM researcher
 5. recorder 更新 `research/state/family_memory.json`、`research/logs/experiment_decisions.jsonl`、`passed_alphas.csv` 或 `failed_alphas.csv`。
 6. 若 candidate 接近提交門檻，先跑 validation；若有多個可用 alpha，再跑 selection 做低相關性篩選。
 7. 若要用平台真實相關性而不是表達式結構代理，先跑 `python -m app fetch-correlations` 把 BRAIN self/prod correlation 快取到 `research/state/alpha_correlations.json`。
-8. selection 會先在同一變體/同收益來源 cluster 中選 best（有快取就用 BRAIN self-correlation，沒有就用結構相似度），再排除與已提交 alpha 高相關的 alpha，最後才寫入 `outputs/submit_queue.csv`。
+8. selection 會先在同一變體/同收益來源 cluster 中選 best（BRAIN self-correlation >= 0.7 或結構相似度 >= 0.85 任一成立就視為同 cluster），再排除與已提交 alpha 高相關的 alpha（同樣兩個訊號取聯集），最後才寫入 `outputs/submit_queue.csv`。
 9. 完整流程收尾時可執行 `select-alphas --finalize-run --clear-candidates`：寫入可接續的 final state，並清空下一輪輸入 `data/candidates.jsonl`。
 
 ## 目錄
@@ -114,6 +114,26 @@ config/
 保留 BRAIN fields/operators catalog。現在不依賴 template 設定。
 
 ```text
+docs/
+```
+
+研究員 layer 的文件，程式不讀：
+
+- `docs/researcher-workflow.md`: 研究員 layer 的設計規格（modes、policies、integration boundary）。
+- `docs/research-policy.md`: 兩個 agent skill 共用的 policy、failure taxonomy、reflection JSON。
+- `docs/researcher-prompt.md`: 給 LLM 的完整研究員 prompt。
+
+```text
+.claude/skills/   .codex/skills/   CLAUDE.md
+```
+
+agent 整合：
+
+- `.claude/skills/worldquant-researcher-workflow/SKILL.md`: Claude Code 的研究 workflow skill，用 `/worldquant-researcher-workflow [mode]` 叫用。
+- `.codex/skills/worldquant-researcher-workflow/SKILL.md`: Codex 版，用 `$worldquant-researcher-workflow [mode]` 叫用。兩份流程要同步，共用的 policy 放在 `docs/research-policy.md`。
+- `CLAUDE.md`: 給 Claude Code 的專案說明：安全規則（`.env` 帳密、測試不打 live API）、常用指令、結構摘要、改程式時要同步的文件。
+
+```text
 logs/
 ```
 
@@ -132,6 +152,14 @@ Copy-Item .env.example .env
 ```env
 WQ_DRY_RUN=true
 WQ_CLIENT_MODE=requests
+```
+
+注意：dry-run 的 `simulate` 不會被擋，mock 結果會照常寫進 `research/logs/*` 與 `family_memory.json`，而且 passed/failed CSV 上沒有 mock 標記（`result_id` 是 expression 的 md5 前 12 碼）。要跑通流程時把路徑指到暫存目錄，不要對真實研究資料跑：
+
+```env
+WQ_RESEARCH_DIR=C:\tmp\wq-smoke\research
+WQ_OUTPUT_DIR=C:\tmp\wq-smoke\outputs
+WQ_CANDIDATE_FILE=C:\tmp\wq-smoke\candidates.jsonl
 ```
 
 要打 live API 時：
@@ -174,44 +202,56 @@ C:\Users\USER\anaconda3\python.exe -m app research --mode pass-alpha-improvement
 - `pass-alpha-search`
 - `pass-alpha-improvement`
 
-啟動研究 workflow：
+啟動研究 workflow。Claude Code：
 
 ```text
-$worldquant-researcher-workflow
-$worldquant-researcher-workflow pass-alpha-search
+/worldquant-researcher-workflow
+/worldquant-researcher-workflow pass-alpha-search
+/worldquant-researcher-workflow pass-alpha-improvement
+```
+
+Codex 用同樣的 mode，只是前綴換成 `$`：
+
+```text
 $worldquant-researcher-workflow pass-alpha-improvement
 ```
 
-這個入口會讀 `research/state/family_memory.json` 自動判斷目前是在，或依你指定的 mode 強制進入：
+這個入口會讀 `research/state/family_memory.json` 自動判斷目前在哪個 loop，或依你指定的 mode 強制進入：
 
 - `pass_alpha_search_loop`
 - `pass_alpha_improvement_loop`
 
 目前這兩個 loop 不是獨立 CLI，而是同一個 research workflow 的兩個狀態。
-Python 負責 simulate / validation / artifact IO，Codex agent 負責研究判斷。
+Python 負責 simulate / validation / attribution / artifact IO，agent 負責研究判斷。
 
-優先使用 skill 命令直接選 loop；`python -m app research --mode ...` 只算 debug / 狀態檢查入口。
+優先使用 skill 命令直接選 loop；`python -m app research --mode ...` 只算 debug / 狀態檢查入口。所有 mode 的意義見下方「Workflow 呼叫」。
 
 ## Workflow 呼叫
 
-主要入口是 skill 指令，不是 Python CLI：
+主要入口是 skill 指令，不是 Python CLI。Claude Code：
+
+```text
+/worldquant-researcher-workflow
+```
+
+Codex：
 
 ```text
 $worldquant-researcher-workflow
 ```
 
-這會讓 Codex 依 `research/state/family_memory.json` 自動決定目前該進哪個 loop。
+這會讓 agent 依 `research/state/family_memory.json` 自動決定目前該進哪個 loop。兩個 skill 的步驟相同（`.claude/skills/` 與 `.codex/skills/`），共用 `docs/research-policy.md`。
 
-如果你想手動指定流程，可以直接帶 mode：
+如果你想手動指定流程，可以直接帶 mode（兩邊都一樣，只差前綴）：
 
 ```text
-$worldquant-researcher-workflow pass-alpha-search
-$worldquant-researcher-workflow pass-alpha-improvement
-$worldquant-researcher-workflow literature-scout
-$worldquant-researcher-workflow hypothesis-builder
-$worldquant-researcher-workflow alpha-designer
-$worldquant-researcher-workflow result-reflector
-$worldquant-researcher-workflow template-governor
+/worldquant-researcher-workflow pass-alpha-search
+/worldquant-researcher-workflow pass-alpha-improvement
+/worldquant-researcher-workflow literature-scout
+/worldquant-researcher-workflow hypothesis-builder
+/worldquant-researcher-workflow alpha-designer
+/worldquant-researcher-workflow result-reflector
+/worldquant-researcher-workflow template-governor
 ```
 
 對應意義：
@@ -419,14 +459,7 @@ LLM 只能做研究判斷，不直接替代回測或 validation。
 
 ### 兩個 loop 的呼叫方式
 
-`pass_alpha_search_loop` 和 `pass_alpha_improvement_loop` 都是透過同一個入口啟動：
-
-```text
-$worldquant-researcher-workflow
-```
-
-workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針對既有 pass alpha 做改善。
-如果之後要做成明確的 Python 指令，再另外加 `python -m app research --mode ...` 類型的入口。
+`pass_alpha_search_loop` 和 `pass_alpha_improvement_loop` 都是透過同一個 skill 入口啟動，workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針對既有 pass alpha 做改善；指令與 mode 清單見上方「Workflow 呼叫」。`python -m app research --mode ...` 只是狀態檢查入口。
 
 ### 研究員 prompt
 
@@ -469,6 +502,7 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 - parent-vs-child metric attribution（`python -m app attribute`，並自動寫入 `experiment_decisions.jsonl`）
 - validation check runner（`python -m app validate-candidate --refresh`，含 self-correlation 快取）
 - BRAIN 真實相關性（`python -m app fetch-correlations`）
+- Claude Code skill 與專案 `CLAUDE.md`（與 Codex skill 共用 `docs/research-policy.md`）
 
 接下來可以加：
 
