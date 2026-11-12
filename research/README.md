@@ -18,6 +18,7 @@ Ignored local files:
 - `logs/passed_alphas.csv`: candidates that reached the validation gate.
 - `logs/failed_alphas.csv`: failed candidates and platform errors.
 - `logs/validation_reports.jsonl` and `logs/validation_reports.csv`: persisted validation reports.
+- `state/alpha_correlations.json`: BRAIN self/prod correlation cache written by `python -m app fetch-correlations`; `select-alphas` prefers it over the structural proxy.
 - `submissions/submitted_alphas.csv`: local submission tracking.
 - `notes/hypotheses.md`: working research notes, unless manually sanitized and moved into docs.
 

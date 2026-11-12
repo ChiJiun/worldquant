@@ -2,6 +2,8 @@ from pathlib import Path
 
 import json
 
+import pytest
+
 from app.cli import _init_data, main, merge_fetched_metrics
 
 
@@ -129,3 +131,77 @@ def test_merge_fetched_metrics_keeps_explicit_values():
     assert merged["fitness"] == 1.3
     assert merged["turnover"] == 0.3
     assert "alpha_id" not in merged
+
+
+def test_record_passed_alpha_cli_refuses_fetch_metrics_in_dry_run(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([
+            "record-passed-alpha",
+            "--candidate-id",
+            "C1",
+            "--family",
+            "f",
+            "--expression",
+            "rank(close)",
+            "--result-id",
+            "alpha-1",
+            "--fetch-metrics",
+        ])
+
+    assert exc_info.value.code == 2
+    assert "needs a live BRAIN client" in capsys.readouterr().err
+    assert not (Path("research") / "logs" / "passed_alphas.csv").exists()
+
+
+def test_fetch_correlations_cli_caches_passed_alphas_with_mock_client(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    logs_dir = Path("research") / "logs"
+    logs_dir.mkdir(parents=True)
+    (logs_dir / "passed_alphas.csv").write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision",
+                '2026-05-10T00:00:00Z,A1,pv,"rank(close)",alpha-1,1.3,1.1,0.10,0.05,0.20,validate_best_candidate',
+                '2026-05-10T00:00:00Z,A2,pv,"rank(open)",alpha-2,1.3,1.1,0.10,0.05,0.20,validate_best_candidate',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["fetch-correlations", "--kind", "both", "--limit", "3", "--allow-mock"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requested_alpha_count"] == 2
+    assert len(payload["fetched"]) == 3
+    assert payload["stopped_at_limit"] is True
+    assert payload["dry_run"] is True
+    assert payload["mock_cache"] is True
+    cache = json.loads((Path("research") / "state" / "alpha_correlations.json").read_text(encoding="utf-8"))
+    assert set(cache["alphas"]) == {"alpha-1", "alpha-2"}
+    # mock entries carry no value, so selection treats these alphas as not covered by the platform
+    assert cache["alphas"]["alpha-1"]["self"]["max_correlation"] is None
+
+
+def test_fetch_correlations_cli_refuses_mock_client_without_allow_mock(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["fetch-correlations", "--alpha-id", "alpha-1"])
+
+    assert exc_info.value.code == 2
+    assert "needs a live BRAIN client" in capsys.readouterr().err
+    assert not (Path("research") / "state" / "alpha_correlations.json").exists()
+
+
+def test_fetch_correlations_cli_requires_alpha_ids(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["fetch-correlations", "--allow-mock"])
+
+    assert exc_info.value.code == 2
+    assert "no alpha ids" in capsys.readouterr().err

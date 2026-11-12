@@ -34,8 +34,9 @@ LLM researcher
 4. 程式寫入 `outputs/current_run/`、`outputs/simulate_results.jsonl` 或 `outputs/simulate_errors.jsonl`。
 5. recorder 更新 `research/state/family_memory.json`、`research/logs/experiment_decisions.jsonl`、`passed_alphas.csv` 或 `failed_alphas.csv`。
 6. 若 candidate 接近提交門檻，先跑 validation；若有多個可用 alpha，再跑 selection 做低相關性篩選。
-7. selection 會先在同一變體/同收益來源 cluster 中選 best，再排除與 `research/submissions/submitted_alphas.csv` 高相關的 alpha，最後才寫入 `outputs/submit_queue.csv`。
-8. 完整流程收尾時可執行 `select-alphas --finalize-run --clear-candidates`：寫入可接續的 final state，並清空下一輪輸入 `data/candidates.jsonl`。
+7. 若要用平台真實相關性而不是表達式結構代理，先跑 `python -m app fetch-correlations` 把 BRAIN self/prod correlation 快取到 `research/state/alpha_correlations.json`。
+8. selection 會先在同一變體/同收益來源 cluster 中選 best（有快取就用 BRAIN self-correlation，沒有就用結構相似度），再排除與已提交 alpha 高相關的 alpha，最後才寫入 `outputs/submit_queue.csv`。
+9. 完整流程收尾時可執行 `select-alphas --finalize-run --clear-candidates`：寫入可接續的 final state，並清空下一輪輸入 `data/candidates.jsonl`。
 
 ## 目錄
 
@@ -51,6 +52,7 @@ Python 程式。現在只保留：
 - `research.py`: 更新 family memory、passed/failed logs、decision log。
 - `validation.py`: 從 research memory 產生 validation report。
 - `selection.py`: 對 passed alphas 做 fingerprint、相關性 clustering、submit queue。
+- `correlations.py`: 解析 BRAIN self/prod correlation 回應、維護 `research/state/alpha_correlations.json` 快取。
 - `research_paths.py`: 集中定義 `research/` 新 layout，並保留舊路徑 fallback。
 - `cli.py`: CLI entry point。
 
@@ -96,6 +98,7 @@ research/
 - `research/state/family_memory.json`: family -> variants -> best candidate -> failure modes -> reusable lessons。
 - `research/state/best_alphas.txt`: global best 與每個 family best 的短摘要。
 - `research/state/portfolio.json`: 本機最佳因子/portfolio 狀態。
+- `research/state/alpha_correlations.json`: `fetch-correlations` 快取的 BRAIN self/prod correlation，`select-alphas` 優先使用。
 - `research/logs/experiment_decisions.jsonl`: 每條結果的 bottleneck、decision、next action。
 - `research/logs/passed_alphas.csv`: 進入 validation 的候選。
 - `research/logs/failed_alphas.csv`: 未通過或平台錯誤的候選。
@@ -330,10 +333,25 @@ C:\Users\USER\anaconda3\python.exe -m app record-passed-alpha `
 
 規則：
 
-- `recorded_at` 預設為現在的 UTC 時間，可用 `--recorded-at` 指定。
+- `recorded_at` 預設為現在的 UTC 時間，可用 `--recorded-at` 指定，必須是 ISO-8601 格式。
+- `--result-id` 必填且不可空白，因為這張表以 BRAIN alpha id 判重。
 - `--decision` 只接受 `validate_best_candidate` 或 `promote_candidate`，確保這張表只放通過 pass gate 的 alpha。
 - 同一個 `--result-id` 已存在時會拒絕寫入，除非加 `--allow-duplicate`。
-- 加 `--fetch-metrics` 會用 `--result-id` 從 BRAIN 補齊沒在命令列指定的指標（需要 live client）。
+- 數值欄位必須是有限數字；`nan`、`inf` 或非數字會被拒絕，避免污染 selection 的排序。
+- 加 `--fetch-metrics` 會用 `--result-id` 從 BRAIN 補齊沒在命令列指定的指標；在 `WQ_DRY_RUN=true` 或 mock client 下會直接報錯。
+
+抓 BRAIN 真實相關性並快取（預設抓 `research/logs/passed_alphas.csv` 裡所有 `result_id` 的 self-correlation）：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app fetch-correlations
+C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --alpha-id 2rJM0lwJ --kind both
+C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --limit 20 --refresh
+```
+
+- `--kind self|prod|both`：self 是跟自己帳號已提交 alpha 的相關性（BRAIN 提交門檻 0.7），`select-alphas` 只用這個。prod 是跟全平台 alpha 的相關性分布，目前只存進快取供人工參考，selection 不使用。
+- 已快取（有數值）的 alpha 預設跳過；`--refresh` 強制重抓，提交新 alpha 後記得跑一次。`--limit N` 限制這次最多打 N 次 API（失敗的呼叫也算），方便分批。
+- BRAIN 計算中會回 `Retry-After`，程式會照平台要求等待（不低於 `WQ_POLL_INTERVAL_SECONDS`、上限 60 秒），最多重試 `WQ_MAX_POLL_ATTEMPTS` 次。
+- 在 `WQ_DRY_RUN=true` 或 mock client 下這個指令會直接報錯：mock 寫入的結果會被當成「平台已確認不相關」，讓已提交 gate 失效。只有為了跑通流程時加 `--allow-mock`，此時寫入的是沒有數值的空項目，`select-alphas` 會視為沒有快取，之後 live 執行也會把它重抓。
 
 跑測試：
 
@@ -397,9 +415,13 @@ workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針�
 
 `python -m app select-alphas` 不是單純排序 passed alpha。它會做三層 gate：
 
-1. **變體內選 best**：同 parent、同 family、同 core signal/direction 或結構相似度高的 alpha 會被分在同一 cluster，只保留 quality score 最高者。
+1. **變體內選 best**：兩條 alpha 只要任一訊號過門檻就進同一 cluster：BRAIN self-correlation 快取裡彼此的 |correlation| >= 0.7，或表達式結構相似度（同 parent、同 core signal/direction、field/operator Jaccard）>= 0.85。注意 BRAIN self-correlation 只會列出該帳號已提交的 alpha，兩條尚未提交的候選不會互相出現，所以候選之間的 clustering 實務上多半仍是結構代理在做。每個 cluster 只保留 quality score 最高者。
 2. **經濟意涵檢查**：candidate 的 expression fingerprint 必須和 family/hypothesis 的 core signal 一致；例如 news hypothesis 不應最後變成純 return-reversal。
-3. **已提交相關性檢查**：cluster winner 仍要和 `research/submissions/submitted_alphas.csv` 比對；如果和已提交 alpha 的結構/metric proxy similarity >= 0.85，就不進 `outputs/submit_queue.csv`。
+3. **已提交相關性檢查**：cluster winner 同時看兩個訊號，任一過門檻就擋：BRAIN self-correlation 快取回報的帶號 max correlation >= 0.7（`replaced_by` 填平台列出的最相關 alpha id），或與 `research/submissions/submitted_alphas.csv` 的結構相似度 >= 0.85。平台數值優先，但結構比對是快取過舊時的安全網：提交新 alpha 後沒 `--refresh`，表達式一模一樣的候選仍會被擋。gate 用的是帶號值，與 BRAIN 的 SELF_CORRELATION check 一致，所以強負相關不會擋提交（clustering 則用絕對值）。被擋的 alpha 不進 `outputs/submit_queue.csv`。`correlation_report.md` 會印出快取裡最舊的 `fetched_at`，太舊就重抓。
+
+以前版本還有一個「metric proxy」相似度（對 Sharpe/Fitness/Returns 等指標向量算 Pearson），但所有好 alpha 的指標形狀都相近，會把不相關的 alpha 全部黏成一團，已經移除。
+
+快取裡有 self-correlation 的 alpha，其 `self_corr_status` 會依 0.7 門檻標成 `pass`/`fail`，並影響 quality score；沒有快取的維持 `pending`。
 
 不同 hypothesis 若其實使用同一組 field/operator、同一 direction，或被判定為同一 `core_signal`，也會被視為相同或相似收益來源，進同一 correlation cluster 競爭代表 alpha。
 

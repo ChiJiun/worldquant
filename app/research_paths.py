@@ -26,6 +26,7 @@ class ResearchPaths:
     submitted_alphas: Path
     hypotheses: Path
     failure_taxonomy: Path
+    alpha_correlations: Path
 
 
 def research_paths(root: Path) -> ResearchPaths:
@@ -56,6 +57,7 @@ def research_paths(root: Path) -> ResearchPaths:
         submitted_alphas=submissions_dir / "submitted_alphas.csv",
         hypotheses=notes_dir / "hypotheses.md",
         failure_taxonomy=root / "failure_taxonomy.json",
+        alpha_correlations=state_dir / "alpha_correlations.json",
     )
 
 

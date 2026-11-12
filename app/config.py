@@ -60,6 +60,8 @@ class Settings:
     research_dir: Path
     log_dir: Path
     fields_config: Path
+    api_self_corr_path: str = "/alphas/{alpha_id}/correlations/self"
+    api_prod_corr_path: str = "/alphas/{alpha_id}/correlations/prod"
 
     @classmethod
     def load(cls, root: Optional[Path] = None) -> "Settings":
@@ -101,6 +103,8 @@ class Settings:
             research_dir=Path(os.getenv("WQ_RESEARCH_DIR", "research")),
             log_dir=Path(os.getenv("WQ_LOG_DIR", "logs")),
             fields_config=Path(os.getenv("WQ_FIELDS_CONFIG", "config/fields.json")),
+            api_self_corr_path=os.getenv("WQ_API_SELF_CORR_PATH", "/alphas/{alpha_id}/correlations/self"),
+            api_prod_corr_path=os.getenv("WQ_API_PROD_CORR_PATH", "/alphas/{alpha_id}/correlations/prod"),
         )
 
     def ensure_directories(self) -> None:

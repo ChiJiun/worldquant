@@ -7,9 +7,17 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import csv
 import json
-import math
 import re
 
+from app.correlations import (
+    has_self_correlation,
+    load_correlation_cache,
+    oldest_fetched_at,
+    self_correlation_between,
+    self_correlation_fetched_at,
+    self_correlation_max,
+    top_self_correlated,
+)
 from app.models import utc_now_iso
 from app.research_paths import existing_or_new, research_paths
 
@@ -42,7 +50,11 @@ REGISTRY_FIELDS = [
 REJECTED_FIELDS = REGISTRY_FIELDS + ["cluster_id", "replaced_by", "reject_reason"]
 BEST_FIELDS = REGISTRY_FIELDS + ["cluster_id"]
 QUEUE_FIELDS = BEST_FIELDS + ["submit_score"]
+# Structural (expression fingerprint) similarity is only a proxy, so it needs a high bar.
 CORRELATION_THRESHOLD = 0.85
+# BRAIN's SELF_CORRELATION submission check fails above 0.7, so platform numbers use that bar.
+PLATFORM_CORRELATION_THRESHOLD = 0.7
+PLATFORM_REASON = "platform_self_corr"
 
 KNOWN_FIELDS = [
     "adv20",
@@ -168,14 +180,17 @@ def run_selection_pipeline(
     submitted = load_submitted_alpha_records(existing_or_new(paths.submitted_alphas, research_dir / "submitted_alphas.csv", research_dir / "old" / "submitted_alphas.csv"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    correlation_cache = load_correlation_cache(paths.alpha_correlations)
+    for record in records:
+        apply_platform_self_correlation_status(record, correlation_cache)
     for record in records + submitted:
         populate_fingerprint(record)
 
-    edges, correlation_matrix = detect_correlation_edges(records)
+    edges, correlation_matrix = detect_correlation_edges(records, correlation_cache)
     clusters = connected_components(records, edges)
     best, rejected = select_cluster_representatives(clusters)
     meaning_rejected = reject_economic_meaning_drift(best)
-    submitted_rejected = reject_submitted_correlations(best, submitted)
+    submitted_rejected = reject_submitted_correlations(best, submitted, correlation_cache)
     rejected.extend(meaning_rejected)
     rejected.extend(submitted_rejected)
     queue = build_submit_queue([record for record in best if record.status == "best"])
@@ -196,9 +211,10 @@ def run_selection_pipeline(
     _write_csv(best_alphas_path, BEST_FIELDS, [record.as_row(include_cluster=True) for record in best])
     _write_csv(output_dir / "rejected_high_corr_alphas.csv", REJECTED_FIELDS, [_rejected_row(record) for record in rejected])
     _write_csv(submit_queue_path, QUEUE_FIELDS, [_queue_row(record) for record in queue])
-    _write_report(correlation_report_path, records, submitted, clusters, best, rejected, queue)
-    _write_recommendations(final_recommendations_path, queue, submitted, rejected)
+    _write_report(correlation_report_path, records, submitted, clusters, best, rejected, queue, correlation_cache, edges)
+    _write_recommendations(final_recommendations_path, queue, submitted, rejected, correlation_cache)
 
+    platform_alpha_count = sum(1 for record in records if has_self_correlation(correlation_cache, record.alpha_id))
     report = {
         "record_count": len(records),
         "submitted_count": len(submitted),
@@ -206,6 +222,10 @@ def run_selection_pipeline(
         "best_count": len(best),
         "rejected_high_corr_count": len(rejected),
         "submit_queue_count": len(queue),
+        "platform_correlation_alpha_count": platform_alpha_count,
+        "platform_correlation_edge_count": sum(1 for _l, _r, reason in edges if reason.startswith(PLATFORM_REASON)),
+        "correlation_cache": str(paths.alpha_correlations),
+        "correlation_cache_oldest_fetched_at": oldest_fetched_at(correlation_cache),
         "outputs": {
             "candidate_alphas": str(candidate_alphas_path),
             "alpha_registry": str(alpha_registry_path),
@@ -338,17 +358,46 @@ def quality_score(record: AlphaRecord) -> float:
     return round(fitness + 0.25 * sharpe + 0.10 * returns - 0.10 * drawdown_penalty - 0.50 * hard_fail_count, 6)
 
 
-def detect_correlation_edges(records: List[AlphaRecord]) -> Tuple[List[Tuple[str, str, str]], List[Dict[str, Any]]]:
+def apply_platform_self_correlation_status(record: AlphaRecord, cache: Dict[str, Dict[str, Any]]) -> None:
+    """Translate the cached BRAIN self-correlation max into the record's self_corr_status."""
+    platform_max = self_correlation_max(cache, record.alpha_id)
+    if platform_max is None:
+        return
+    record.self_corr_status = "fail" if platform_max >= PLATFORM_CORRELATION_THRESHOLD else "pass"
+
+
+def pairwise_similarity(left: AlphaRecord, right: AlphaRecord, cache: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[float, float, Optional[float]]:
+    """Return (score, threshold, platform_corr) for a pair.
+
+    The pair is linked when either signal crosses its own threshold: a BRAIN self-correlation between
+    the two alphas (``|corr| >= 0.7``) or the expression-structure proxy (``>= 0.85``). The platform
+    number is preferred when it crosses; the structural proxy is the safety net for a stale or partial
+    cache (BRAIN only lists alphas already submitted, so two unsubmitted candidates rarely appear in each
+    other's self-correlation). Below both thresholds the platform number is reported when available.
+    """
+    platform = self_correlation_between(cache or {}, left.alpha_id, right.alpha_id)
+    structural = structural_similarity(left, right)
+    if platform is not None and platform >= PLATFORM_CORRELATION_THRESHOLD:
+        return platform, PLATFORM_CORRELATION_THRESHOLD, platform
+    if structural >= CORRELATION_THRESHOLD:
+        return structural, CORRELATION_THRESHOLD, None
+    if platform is not None:
+        return platform, PLATFORM_CORRELATION_THRESHOLD, platform
+    return structural, CORRELATION_THRESHOLD, None
+
+
+def detect_correlation_edges(
+    records: List[AlphaRecord],
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Tuple[List[Tuple[str, str, str]], List[Dict[str, Any]]]:
     edges: List[Tuple[str, str, str]] = []
     score_lookup: Dict[Tuple[str, str], float] = {}
     for left, right in combinations(records, 2):
-        structural = structural_similarity(left, right)
-        metric_corr = metric_similarity(left, right)
-        score_lookup[(left.alpha_id, right.alpha_id)] = max(structural, metric_corr)
-        score_lookup[(right.alpha_id, left.alpha_id)] = max(structural, metric_corr)
-        score = max(structural, metric_corr)
-        if score >= CORRELATION_THRESHOLD:
-            edges.append((left.alpha_id, right.alpha_id, correlation_reason(left, right, structural, metric_corr)))
+        score, threshold, platform = pairwise_similarity(left, right, cache)
+        score_lookup[(left.alpha_id, right.alpha_id)] = score
+        score_lookup[(right.alpha_id, left.alpha_id)] = score
+        if score >= threshold:
+            edges.append((left.alpha_id, right.alpha_id, correlation_reason(left, right, score, platform)))
 
     matrix_rows: List[Dict[str, Any]] = []
     for left in records:
@@ -370,25 +419,16 @@ def structural_similarity(left: AlphaRecord, right: AlphaRecord) -> float:
     return min(1.0, 0.55 * field_score + 0.35 * operator_score + family_bonus)
 
 
-def correlation_reason(left: AlphaRecord, right: AlphaRecord, structural: float, metric_corr: float) -> str:
+def correlation_reason(left: AlphaRecord, right: AlphaRecord, structural: float, platform: Optional[float] = None) -> str:
+    if platform is not None:
+        return f"{PLATFORM_REASON}_high"
     if left.core_signal == right.core_signal and left.direction == right.direction and left.family != right.family:
         return "same_return_source_cross_hypothesis"
     if left.parent_alpha_id and left.parent_alpha_id == right.parent_alpha_id:
         return "same_variant_family"
     if structural >= CORRELATION_THRESHOLD:
         return "structural_high"
-    if metric_corr >= CORRELATION_THRESHOLD:
-        return "metric_proxy_high"
     return "correlation_high"
-
-
-def metric_similarity(left: AlphaRecord, right: AlphaRecord) -> float:
-    left_values = _metric_vector(left)
-    right_values = _metric_vector(right)
-    if len(left_values) < 3 or len(right_values) < 3:
-        return 0.0
-    corr = _pearson(left_values, right_values)
-    return abs(corr) if corr is not None else 0.0
 
 
 def connected_components(records: List[AlphaRecord], edges: List[Tuple[str, str, str]]) -> List[List[AlphaRecord]]:
@@ -451,18 +491,25 @@ def reject_economic_meaning_drift(best: List[AlphaRecord]) -> List[AlphaRecord]:
     return rejected
 
 
-def reject_submitted_correlations(best: List[AlphaRecord], submitted: List[AlphaRecord]) -> List[AlphaRecord]:
+def reject_submitted_correlations(
+    best: List[AlphaRecord],
+    submitted: List[AlphaRecord],
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[AlphaRecord]:
+    """Block cluster winners that BRAIN (or, failing that, the structural proxy) says duplicate a submitted alpha."""
     rejected: List[AlphaRecord] = []
-    if not submitted:
+    cache = cache or {}
+    if not submitted and not cache:
         return rejected
     for record in best:
         if record.status != "best":
             continue
-        match = best_submitted_match(record, submitted)
+        match = best_submitted_match(record, submitted, cache)
         if match is None:
             continue
         submitted_record, score, reason = match
-        if score < CORRELATION_THRESHOLD:
+        threshold = PLATFORM_CORRELATION_THRESHOLD if reason.startswith(PLATFORM_REASON) else CORRELATION_THRESHOLD
+        if score < threshold:
             continue
         record.status = "rejected_submitted_corr"
         record.replaced_by = submitted_record.alpha_id
@@ -471,16 +518,61 @@ def reject_submitted_correlations(best: List[AlphaRecord], submitted: List[Alpha
     return rejected
 
 
-def best_submitted_match(record: AlphaRecord, submitted: List[AlphaRecord]) -> Optional[Tuple[AlphaRecord, float, str]]:
-    best_match: Optional[Tuple[AlphaRecord, float, str]] = None
+def best_submitted_match(
+    record: AlphaRecord,
+    submitted: List[AlphaRecord],
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[Tuple[AlphaRecord, float, str]]:
+    """Strongest evidence that ``record`` duplicates a submitted alpha.
+
+    Platform self-correlation (threshold 0.7) and the structural proxy against the local submitted CSV
+    (threshold 0.85) are both evaluated; whichever crosses its threshold wins, platform first. A stale
+    cache therefore cannot let an expression identical to a submitted alpha through. Below both
+    thresholds the platform match is reported when BRAIN covers the alpha, else the best structural one.
+    """
+    cache = cache or {}
+    platform_match: Optional[Tuple[AlphaRecord, float, str]] = None
+    platform_max = self_correlation_max(cache, record.alpha_id)
+    if platform_max is not None:
+        top = top_self_correlated(cache, record.alpha_id)
+        other_id = str(top.get("alpha_id") or "") if top else ""
+        matched = next((item for item in submitted if item.alpha_id == other_id), None) if other_id else None
+        counterpart = matched or _platform_submitted_record(other_id or "platform", top or {})
+        platform_match = (counterpart, platform_max, PLATFORM_REASON)
+    structural_match: Optional[Tuple[AlphaRecord, float, str]] = None
     for submitted_record in submitted:
         structural = structural_similarity(record, submitted_record)
-        metric_corr = metric_similarity(record, submitted_record)
-        score = max(structural, metric_corr)
-        reason = correlation_reason(record, submitted_record, structural, metric_corr)
-        if best_match is None or score > best_match[1]:
-            best_match = (submitted_record, score, reason)
-    return best_match
+        reason = correlation_reason(record, submitted_record, structural)
+        if structural_match is None or structural > structural_match[1]:
+            structural_match = (submitted_record, structural, reason)
+    if platform_match is not None and platform_match[1] >= PLATFORM_CORRELATION_THRESHOLD:
+        return platform_match
+    if structural_match is not None and structural_match[1] >= CORRELATION_THRESHOLD:
+        return structural_match
+    return platform_match or structural_match
+
+
+def _platform_submitted_record(alpha_id: str, record: Dict[str, Any]) -> AlphaRecord:
+    """Stand-in for a platform alpha that BRAIN lists in self-correlation but the local submitted CSV does not know."""
+    return AlphaRecord(
+        alpha_id=alpha_id,
+        candidate_id=str(record.get("name") or alpha_id),
+        expression=str(record.get("code") or record.get("regular") or ""),
+        parent_alpha_id="",
+        workflow_type="platform",
+        family="submitted",
+        core_signal="unknown",
+        fields=[],
+        operators=[],
+        lookbacks=[],
+        direction="unknown",
+        sharpe=_float(record.get("sharpe")),
+        fitness=_float(record.get("fitness")),
+        returns=_float(record.get("returns")),
+        turnover=_float(record.get("turnover")),
+        drawdown=_float(record.get("drawdown")),
+        status="submitted",
+    )
 
 
 def build_submit_queue(best: List[AlphaRecord]) -> List[AlphaRecord]:
@@ -542,7 +634,21 @@ def _queue_row(record: AlphaRecord) -> Dict[str, Any]:
     return row
 
 
-def _write_report(path: Path, records: List[AlphaRecord], submitted: List[AlphaRecord], clusters: List[List[AlphaRecord]], best: List[AlphaRecord], rejected: List[AlphaRecord], queue: List[AlphaRecord]) -> None:
+def _write_report(
+    path: Path,
+    records: List[AlphaRecord],
+    submitted: List[AlphaRecord],
+    clusters: List[List[AlphaRecord]],
+    best: List[AlphaRecord],
+    rejected: List[AlphaRecord],
+    queue: List[AlphaRecord],
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+    edges: Optional[List[Tuple[str, str, str]]] = None,
+) -> None:
+    cache = cache or {}
+    edges = edges or []
+    platform_alpha_count = sum(1 for record in records if has_self_correlation(cache, record.alpha_id))
+    platform_edge_count = sum(1 for _l, _r, reason in edges if reason.startswith(PLATFORM_REASON))
     lines = [
         "# Correlation Report",
         "",
@@ -553,6 +659,9 @@ def _write_report(path: Path, records: List[AlphaRecord], submitted: List[AlphaR
         f"- best_count: {len(best)}",
         f"- rejected_high_corr_count: {len(rejected)}",
         f"- submit_queue_count: {len(queue)}",
+        f"- platform_self_correlation_alpha_count: {platform_alpha_count} (threshold {PLATFORM_CORRELATION_THRESHOLD:g}; run `python -m app fetch-correlations` to cover more alphas)",
+        f"- platform_correlation_edges: {platform_edge_count}; structural threshold {CORRELATION_THRESHOLD:g} (either signal crossing its threshold links a pair)",
+        f"- platform_cache_oldest_fetched_at: {oldest_fetched_at(cache) or 'n/a'} (re-run fetch-correlations --refresh after submitting new alphas)",
         "",
         "## Clusters",
         "",
@@ -576,7 +685,13 @@ def _write_report(path: Path, records: List[AlphaRecord], submitted: List[AlphaR
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _write_recommendations(path: Path, queue: List[AlphaRecord], submitted: List[AlphaRecord], rejected: List[AlphaRecord]) -> None:
+def _write_recommendations(
+    path: Path,
+    queue: List[AlphaRecord],
+    submitted: List[AlphaRecord],
+    rejected: List[AlphaRecord],
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> None:
     lines = [
         "# Final Alpha Recommendations",
         "",
@@ -599,22 +714,32 @@ def _write_recommendations(path: Path, queue: List[AlphaRecord], submitted: List
         if blocked:
             lines.extend(["## Blocked Best Candidates", ""])
             for record in blocked:
-                lines.extend(recommendation_block(record, submitted, blocked=True))
+                lines.extend(recommendation_block(record, submitted, blocked=True, cache=cache))
         path.write_text("\n".join(lines), encoding="utf-8")
         return
 
     for index, record in enumerate(queue, start=1):
         lines.extend([f"## {index}. {record.alpha_id}", ""])
-        lines.extend(recommendation_block(record, submitted, blocked=False))
+        lines.extend(recommendation_block(record, submitted, blocked=False, cache=cache))
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def recommendation_block(record: AlphaRecord, submitted: List[AlphaRecord], *, blocked: bool) -> List[str]:
-    match = best_submitted_match(record, submitted)
-    match_text = "No submitted alpha registry available."
+def recommendation_block(
+    record: AlphaRecord,
+    submitted: List[AlphaRecord],
+    *,
+    blocked: bool,
+    cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> List[str]:
+    match = best_submitted_match(record, submitted, cache)
+    match_text = "No submitted alpha registry or platform self-correlation available."
     if match is not None:
         submitted_record, score, reason = match
-        match_text = f"Best submitted match `{submitted_record.alpha_id}` score={score:.4f}, reason={reason}."
+        source = "BRAIN self-correlation" if reason.startswith(PLATFORM_REASON) else "structural proxy"
+        match_text = f"Best submitted match `{submitted_record.alpha_id}` score={score:.4f}, reason={reason} ({source})."
+        fetched_at = self_correlation_fetched_at(cache or {}, record.alpha_id)
+        if fetched_at:
+            match_text += f" Platform self-correlation fetched_at={fetched_at}."
     status_line = f"- status: `{record.status}`"
     if blocked:
         status_line += f" reason=`{record.reject_reason}`"
@@ -631,6 +756,7 @@ def recommendation_block(record: AlphaRecord, submitted: List[AlphaRecord], *, b
         f"- IS Returns: `{_format_number(record.returns)}`",
         f"- IS Turnover: `{_format_number(record.turnover)}`",
         f"- IS Drawdown: `{_format_number(record.drawdown)}`",
+        f"- self_corr_status: `{record.self_corr_status}`",
         f"- economic_meaning: {economic_meaning_description(record)}",
         f"- selection_reason: {selection_reason(record)}",
         f"- OS_overfit_risk: {os_overfit_risk(record)}",
@@ -669,7 +795,7 @@ def os_overfit_risk(record: AlphaRecord) -> str:
     if "fail" in blocking_statuses:
         return "high: at least one validation status is failed; do not submit without clearing it."
     if "pending" in blocking_statuses or "unknown" in blocking_statuses:
-        return "medium: recommendation is based on IS metrics plus structural gates; require live OS/self-correlation review."
+        return "medium: recommendation is based on IS metrics plus structural gates; run fetch-correlations and review OS before submitting."
     if record.drawdown is not None and record.drawdown > 0.10:
         return "medium: validation statuses are available, but drawdown is elevated."
     return "lower: available validation statuses are not blocking, but OS performance still needs final platform review."
@@ -757,27 +883,6 @@ def _infer_workflow_type(candidate_id: str) -> str:
     if candidate_id.startswith("SEARCH"):
         return "mining"
     return "legacy"
-
-
-def _metric_vector(record: AlphaRecord) -> List[float]:
-    values = [record.sharpe, record.fitness, record.returns, record.turnover, record.drawdown]
-    return [float(value) for value in values if value is not None]
-
-
-def _pearson(left: List[float], right: List[float]) -> Optional[float]:
-    count = min(len(left), len(right))
-    if count < 3:
-        return None
-    x = left[:count]
-    y = right[:count]
-    mean_x = sum(x) / count
-    mean_y = sum(y) / count
-    numerator = sum((a - mean_x) * (b - mean_y) for a, b in zip(x, y))
-    denom_x = math.sqrt(sum((a - mean_x) ** 2 for a in x))
-    denom_y = math.sqrt(sum((b - mean_y) ** 2 for b in y))
-    if denom_x == 0 or denom_y == 0:
-        return None
-    return numerator / (denom_x * denom_y)
 
 
 def _jaccard(left: Set[str], right: Set[str]) -> float:
