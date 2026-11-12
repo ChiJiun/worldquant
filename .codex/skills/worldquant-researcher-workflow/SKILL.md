@@ -179,7 +179,7 @@ If a setting is overridden, include it in `changed_dimension` and `notes` in `da
    Run `python -m app attribute --candidate-id <id>` to get the child-vs-parent metric deltas and verdict instead of eyeballing them; the same block is stored as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`.
    When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding.
 
-7. Reflect with the taxonomy in `references/research-policy.md`.
+7. Reflect with the taxonomy in `docs/research-policy.md` (shared with the Claude Code skill under `.claude/skills/`).
    Decide exactly one next action:
    - `test_formula`
    - `validate_checks`
@@ -272,4 +272,5 @@ When acting as the researcher agent, end with compact JSON plus a short summary:
 }
 ```
 
-Use `references/research-policy.md` for the full policy and failure taxonomy.
+Use `docs/research-policy.md` for the full policy and failure taxonomy. The Claude Code version of this
+skill lives in `.claude/skills/worldquant-researcher-workflow/SKILL.md`; keep the two in sync when the loop changes.
