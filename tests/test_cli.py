@@ -171,7 +171,7 @@ def test_fetch_correlations_cli_caches_passed_alphas_with_mock_client(settings, 
         encoding="utf-8",
     )
 
-    exit_code = main(["fetch-correlations", "--kind", "both", "--limit", "3"])
+    exit_code = main(["fetch-correlations", "--kind", "both", "--limit", "3", "--allow-mock"])
 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -179,16 +179,29 @@ def test_fetch_correlations_cli_caches_passed_alphas_with_mock_client(settings, 
     assert len(payload["fetched"]) == 3
     assert payload["stopped_at_limit"] is True
     assert payload["dry_run"] is True
+    assert payload["mock_cache"] is True
     cache = json.loads((Path("research") / "state" / "alpha_correlations.json").read_text(encoding="utf-8"))
     assert set(cache["alphas"]) == {"alpha-1", "alpha-2"}
-    assert cache["alphas"]["alpha-1"]["self"]["max_correlation"] == 0.0
+    # mock entries carry no value, so selection treats these alphas as not covered by the platform
+    assert cache["alphas"]["alpha-1"]["self"]["max_correlation"] is None
+
+
+def test_fetch_correlations_cli_refuses_mock_client_without_allow_mock(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["fetch-correlations", "--alpha-id", "alpha-1"])
+
+    assert exc_info.value.code == 2
+    assert "needs a live BRAIN client" in capsys.readouterr().err
+    assert not (Path("research") / "state" / "alpha_correlations.json").exists()
 
 
 def test_fetch_correlations_cli_requires_alpha_ids(settings, monkeypatch, capsys):
     monkeypatch.chdir(settings.candidate_file.parent.parent)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["fetch-correlations"])
+        main(["fetch-correlations", "--allow-mock"])
 
     assert exc_info.value.code == 2
     assert "no alpha ids" in capsys.readouterr().err

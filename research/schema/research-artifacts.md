@@ -27,10 +27,10 @@ If a result should be shared, summarize it in `docs/` or place a sanitized minia
 2. rejecting winners whose expression fingerprint drifts away from the family/hypothesis economic meaning,
 3. rejecting winners that are highly similar to already submitted alphas in `research/submissions/submitted_alphas.csv`.
 
-Submitted alpha rows should include at least `alpha_id` and `expression`. When `research/state/alpha_correlations.json` holds a BRAIN self-correlation entry for a candidate, that platform number (threshold 0.7) replaces the structural comparison against this CSV; the CSV is still used to attach the local record of the matching submitted alpha and as the fallback when no platform data is cached.
+Submitted alpha rows should include at least `alpha_id` and `expression`. When `research/state/alpha_correlations.json` holds a BRAIN self-correlation entry for a candidate, that platform number (threshold 0.7) is checked alongside the structural comparison against this CSV (threshold 0.85); either signal crossing its threshold blocks submission, platform first. The CSV also attaches the local record of the matching submitted alpha.
 
 ## Correlation Cache
 
-`python -m app fetch-correlations` stores `{"version": 1, "updated_at": ..., "alphas": {alpha_id: {"self": {...}, "prod": {...}}}}`. Each entry keeps `max_correlation`, `min_correlation`, `record_count`, `records` (schema-zipped rows from BRAIN) and `fetched_at`. Pairwise clustering uses `|correlation|` from the `self` records; the submit gate uses the signed `max_correlation`.
+`python -m app fetch-correlations` stores `{"version": 1, "updated_at": ..., "alphas": {alpha_id: {"self": {...}, "prod": {...}}}}`. Each entry keeps `max_correlation`, `min_correlation`, `record_count`, `records` (schema-zipped rows from BRAIN) and `fetched_at`. Pairwise clustering uses `|correlation|` from the `self` records; the submit gate uses the signed `max_correlation`. An entry whose `max_correlation` is `null` (written by `--allow-mock` smoke runs) is ignored by selection and refetched on the next live run. `prod` entries are stored for reference only. `correlation_report.md` prints the oldest `fetched_at` so a stale cache is visible.
 
 Use `--finalize-run` to write the structured final state. Use `--clear-candidates` only after the current candidate input has already been simulated and selected. `passed_alphas.csv` remains cumulative because removing it would erase the candidate pool needed for future clustering.

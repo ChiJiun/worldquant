@@ -118,7 +118,17 @@ def make_parser() -> argparse.ArgumentParser:
     )
     corr.add_argument("--kind", choices=["self", "prod", "both"], default="self", help="Which correlation endpoint(s) to call")
     corr.add_argument("--refresh", action="store_true", help="Refetch alphas that are already cached")
-    corr.add_argument("--limit", type=int, default=None, help="Max number of API fetches this run (cached alphas do not count)")
+    corr.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max number of API calls this run, failed calls included (alphas skipped as cached do not count)",
+    )
+    corr.add_argument(
+        "--allow-mock",
+        action="store_true",
+        help="Smoke-test only: let the mock client write empty (valueless) entries into the cache under WQ_DRY_RUN=true",
+    )
 
     select = subparsers.add_parser("select-alphas", help="Build low-correlation best alpha pool and submit queue")
     select.add_argument("--finalize-run", action="store_true", help="Persist a structured final selection state for the next workflow turn")
@@ -149,6 +159,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "fetch-correlations":
+        mock_client = settings.dry_run or settings.client_mode.lower() == "mock"
+        if mock_client and not args.allow_mock:
+            parser.error(
+                "fetch-correlations needs a live BRAIN client: the mock client would cache empty results and disable the "
+                "submitted-alpha gate; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests, or pass --allow-mock for a smoke run"
+            )
         paths = research_paths(settings.research_dir)
         alpha_ids = args.alpha_id or [record.alpha_id for record in load_passed_alpha_records(paths.passed_alphas)]
         if not alpha_ids:
@@ -164,6 +180,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         report["client_mode"] = getattr(client, "last_login_mode", None) or settings.client_mode
         report["dry_run"] = settings.dry_run
+        report["mock_cache"] = mock_client
         print(render_metrics_payload(report))
         return 0
 

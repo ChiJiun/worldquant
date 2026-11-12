@@ -15,6 +15,8 @@ from app.config import Settings
 from app.correlations import parse_correlation_payload
 from app.models import AlphaCandidate, CorrelationResult, SimulationHandle, SimulationMetrics, utc_now_iso
 
+MAX_RETRY_AFTER_SECONDS = 60.0
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -150,11 +152,20 @@ class RequestsBrainClient(BrainClient):
         )
 
     def _retry_delay(self, retry_after: str) -> float:
+        """Seconds to wait before polling a correlation endpoint again.
+
+        BRAIN's ``Retry-After`` is honoured (never polling faster than it asks) up to
+        ``MAX_RETRY_AFTER_SECONDS``; the configured poll interval is the floor, and an unparsable or
+        non-positive header falls back to that interval (at least one second so the loop cannot spin).
+        """
+        floor = self.settings.poll_interval_seconds if self.settings.poll_interval_seconds > 0 else 1.0
         try:
             delay = float(retry_after)
         except (TypeError, ValueError):
-            delay = self.settings.poll_interval_seconds
-        return max(0.0, min(delay, self.settings.poll_interval_seconds * 2 if self.settings.poll_interval_seconds > 0 else delay))
+            return floor
+        if delay <= 0:
+            return floor
+        return min(max(delay, self.settings.poll_interval_seconds), MAX_RETRY_AFTER_SECONDS)
 
     @staticmethod
     def _has_correlation_payload(data: Dict[str, Any]) -> bool:
@@ -303,9 +314,14 @@ class MockBrainClient(BrainClient):
         return self._mock_correlation(alpha_id, "prod")
 
     def _mock_correlation(self, alpha_id: str, kind: str) -> CorrelationResult:
-        """Return a preset payload when a test registered one, otherwise an empty, uncorrelated result."""
+        """Return a preset payload when a test registered one, otherwise an empty result with no value.
+
+        The default deliberately has no ``max``/``min``: a cached ``0.0`` would look like a real platform
+        number and switch off the structural submitted-alpha gate, whereas ``None`` is treated as
+        "not covered" by selection.
+        """
         self.rate_limiter.wait()
-        payload = self.correlation_payloads.get((alpha_id, kind), {"max": 0.0, "min": 0.0, "records": [], "mode": "mock"})
+        payload = self.correlation_payloads.get((alpha_id, kind), {"records": [], "mode": "mock"})
         return parse_correlation_payload(alpha_id, kind, payload)
 
 

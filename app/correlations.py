@@ -91,6 +91,28 @@ def has_self_correlation(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> boo
     return self_correlation_max(cache, alpha_id) is not None
 
 
+def self_correlation_fetched_at(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> Optional[str]:
+    entry = cache.get(alpha_id, {}).get(SELF_KIND)
+    value = entry.get("fetched_at") if isinstance(entry, dict) else None
+    return str(value) if value else None
+
+
+def oldest_fetched_at(cache: Dict[str, Dict[str, Any]], kind: str = SELF_KIND) -> Optional[str]:
+    """Oldest ``fetched_at`` among valued ``kind`` entries, so reports can flag a stale cache."""
+    stamps = []
+    for entry in cache.values():
+        item = entry.get(kind) if isinstance(entry, dict) else None
+        if isinstance(item, dict) and item.get("max_correlation") is not None and item.get("fetched_at"):
+            stamps.append(str(item["fetched_at"]))
+    return min(stamps) if stamps else None
+
+
+def is_cached(cache: Dict[str, Dict[str, Any]], alpha_id: str, kind: str) -> bool:
+    """True when the cache holds a usable (valued) ``kind`` entry; valueless smoke-test entries are refetched."""
+    entry = cache.get(alpha_id, {}).get(kind)
+    return isinstance(entry, dict) and entry.get("max_correlation") is not None
+
+
 def top_self_correlated(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> Optional[Dict[str, Any]]:
     """The platform alpha most positively correlated with ``alpha_id`` according to the self-correlation records."""
     best: Optional[Dict[str, Any]] = None
@@ -129,8 +151,9 @@ def fetch_correlations(
 ) -> Dict[str, Any]:
     """Fetch correlation payloads for ``alpha_ids`` and merge them into the JSON cache.
 
-    ``limit`` caps the number of API fetches (cached entries that are skipped do not count), so a
-    rate-limited session can be resumed by re-running the command.
+    ``limit`` caps the number of API calls, failed calls included (entries skipped as cached do not
+    count), so a rate-limited session can be resumed by re-running the command. Entries without a
+    ``max_correlation`` value (for example written by the mock client) are not treated as cached.
     """
     for kind in kinds:
         if kind not in CORRELATION_KINDS:
@@ -144,7 +167,7 @@ def fetch_correlations(
     stopped_at_limit = False
     for alpha_id in requested:
         for kind in kinds:
-            if not refresh and isinstance(cache.get(alpha_id, {}).get(kind), dict):
+            if not refresh and is_cached(cache, alpha_id, kind):
                 skipped.append({"alpha_id": alpha_id, "kind": kind, "reason": "cached"})
                 continue
             if limit is not None and fetch_count >= limit:
