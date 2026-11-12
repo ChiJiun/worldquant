@@ -109,7 +109,7 @@ Perform one loop at a time.
    - `changed_dimension`
    - `notes`
 
-5. Run at most one simulation unless the user explicitly asks for a batch. First confirm the client is live: `settings` must show `dry_run=False` and `client_mode=requests`, because a dry-run `simulate` is not refused and writes mock rows into `research/` (the passed/failed CSVs carry no mock marker). If it shows `dry_run=True`, stop and ask the user.
+5. Run at most one simulation unless the user explicitly asks for a batch. First confirm the client is live: `settings` must show `dry_run=False` and `client_mode=requests`. Under `dry_run=True` `simulate` is refused unless `--allow-mock` is passed; a mock run tags its rows `source=mock` (skipped by `select-alphas`) but still belongs in a temporary `WQ_RESEARCH_DIR`, never the real `research/`. If `settings` shows `dry_run=True`, stop and ask the user.
 
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m app settings
@@ -125,6 +125,7 @@ Preferred candidate-level form:
   "candidate_id": "A_settings_001",
   "family": "cashflow_quality",
   "expression": "rank(cashflow / assets)",
+  "parent_candidate_id": "A_settings_000",
   "changed_dimension": "truncation_0.08_to_0.05",
   "simulation_settings": {
     "instrument_type": "EQUITY",
@@ -179,8 +180,8 @@ Supported per-run setting dimensions:
 If a setting is overridden, include it in `changed_dimension` and `notes` in `data/candidates.jsonl`.
 
 6. Read new artifacts from `outputs/current_run/` and `research/`.
-   Run `python -m app attribute --candidate-id <id>` to get the child-vs-parent metric deltas and verdict instead of eyeballing them; the same block is stored as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`.
-   When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding.
+   Run `python -m app attribute --candidate-id <id>` to get the child-vs-parent metric deltas and verdict instead of eyeballing them; the same block is stored as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`. `incomparable` means the parent has no metrics (an error row), not a neutral change.
+   When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding. Pass `--result-id <alpha id>` to `attribute` or `validate-candidate` when the same `candidate_id` was reused across families (the report warns when that happened).
 
 7. Reflect with the taxonomy in `docs/research-policy.md` (path relative to the repository root; shared with the Claude Code skill under `.claude/skills/`).
    Decide exactly one next action:
@@ -279,5 +280,6 @@ Use `docs/research-policy.md` (relative to the repository root) for the full pol
 version of this skill lives in `.claude/skills/worldquant-researcher-workflow/SKILL.md`; keep the two in sync when the loop changes.
 
 The PowerShell examples above use the Anaconda interpreter from the README; any interpreter that has this project installed
-works (for example `.venv\Scripts\python.exe`). `simulate` under `WQ_DRY_RUN=true` is not refused and writes mock rows into
-`research/`, so confirm `python -m app settings` shows `dry_run=False` before step 5.
+works (for example `.venv\Scripts\python.exe`). `simulate` under `WQ_DRY_RUN=true` is refused unless `--allow-mock` is passed,
+and even then its rows are only tagged `source=mock`, not kept out of `research/`; confirm `python -m app settings` shows
+`dry_run=False` before step 5, and run smoke tests against a temporary `WQ_RESEARCH_DIR`.

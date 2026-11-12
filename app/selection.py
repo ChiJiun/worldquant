@@ -20,6 +20,7 @@ from app.correlations import (
     top_self_correlated,
 )
 from app.models import utc_now_iso
+from app.research import is_mock_source
 from app.research_paths import existing_or_new, research_paths
 
 
@@ -177,8 +178,10 @@ def run_selection_pipeline(
     clear_candidates: bool = False,
 ) -> Dict[str, Any]:
     paths = research_paths(research_dir)
-    records = load_passed_alpha_records(existing_or_new(paths.passed_alphas, research_dir / "passed_alphas.csv", research_dir / "old" / "passed_alphas.csv"))
-    submitted = load_submitted_alpha_records(existing_or_new(paths.submitted_alphas, research_dir / "submitted_alphas.csv", research_dir / "old" / "submitted_alphas.csv"))
+    passed_path = passed_alphas_path(research_dir)
+    records = load_passed_alpha_records(passed_path)
+    mock_rows_skipped = count_mock_alpha_rows(passed_path)
+    submitted = load_submitted_alpha_records(submitted_alphas_path(research_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     correlation_cache = load_correlation_cache(paths.alpha_correlations)
@@ -212,12 +215,13 @@ def run_selection_pipeline(
     _write_csv(best_alphas_path, BEST_FIELDS, [record.as_row(include_cluster=True) for record in best])
     _write_csv(output_dir / "rejected_high_corr_alphas.csv", REJECTED_FIELDS, [_rejected_row(record) for record in rejected])
     _write_csv(submit_queue_path, QUEUE_FIELDS, [_queue_row(record) for record in queue])
-    _write_report(correlation_report_path, records, submitted, clusters, best, rejected, queue, correlation_cache, edges)
+    _write_report(correlation_report_path, records, submitted, clusters, best, rejected, queue, correlation_cache, edges, mock_rows_skipped)
     _write_recommendations(final_recommendations_path, queue, submitted, rejected, correlation_cache)
 
     platform_alpha_count = sum(1 for record in records if has_self_correlation(correlation_cache, record.alpha_id))
     report = {
         "record_count": len(records),
+        "mock_rows_skipped": mock_rows_skipped,
         "submitted_count": len(submitted),
         "cluster_count": len(clusters),
         "best_count": len(best),
@@ -252,12 +256,40 @@ def run_selection_pipeline(
     return report
 
 
-def load_passed_alpha_records(path: Path) -> List[AlphaRecord]:
+def passed_alphas_path(research_dir: Path) -> Path:
+    """``research/logs/passed_alphas.csv`` with the legacy flat / ``old`` locations as read fallbacks."""
+    paths = research_paths(research_dir)
+    return existing_or_new(paths.passed_alphas, research_dir / "passed_alphas.csv", research_dir / "old" / "passed_alphas.csv")
+
+
+def submitted_alphas_path(research_dir: Path) -> Path:
+    paths = research_paths(research_dir)
+    return existing_or_new(paths.submitted_alphas, research_dir / "submitted_alphas.csv", research_dir / "old" / "submitted_alphas.csv")
+
+
+def count_mock_alpha_rows(path: Path) -> int:
+    """Rows of a passed/failed alpha CSV tagged ``source=mock`` (rows without the column count as live)."""
+    if not path.exists():
+        return 0
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return sum(1 for row in csv.DictReader(handle) if is_mock_source(row.get("source")))
+
+
+def load_passed_alpha_records(path: Path, *, include_mock: bool = False) -> List[AlphaRecord]:
+    """Passed alphas as selection records.
+
+    Rows whose ``source`` column is ``mock`` (written by a ``simulate --allow-mock`` smoke run) are
+    skipped unless ``include_mock`` is set: their ``result_id`` is not a BRAIN alpha id and their metrics
+    are synthetic, so they must never reach the submit queue. Rows without the column (written before it
+    existed) are treated as live.
+    """
     if not path.exists():
         return []
     records: List[AlphaRecord] = []
     with path.open("r", encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
+            if not include_mock and is_mock_source(row.get("source")):
+                continue
             expression = str(row.get("expression") or "").strip()
             alpha_id = str(row.get("result_id") or row.get("candidate_id") or "").strip()
             if not expression or not alpha_id:
@@ -374,15 +406,12 @@ def pairwise_similarity(left: AlphaRecord, right: AlphaRecord, cache: Optional[D
     the two alphas (``|corr| >= 0.7``) or the expression-structure proxy (``>= 0.85``). The platform
     number is preferred when it crosses; the structural proxy is the safety net for a stale or partial
     cache (BRAIN only lists alphas already submitted, so two unsubmitted candidates rarely appear in each
-    other's self-correlation). Below both thresholds the platform number is reported when available.
+    other's self-correlation). Below both thresholds the structural score is returned, so the
+    correlation matrix stays on one scale; the platform number only appears when it did the linking.
     """
     platform = self_correlation_between(cache or {}, left.alpha_id, right.alpha_id)
     structural = structural_similarity(left, right)
     if platform is not None and platform >= PLATFORM_CORRELATION_THRESHOLD:
-        return platform, PLATFORM_CORRELATION_THRESHOLD, platform
-    if structural >= CORRELATION_THRESHOLD:
-        return structural, CORRELATION_THRESHOLD, None
-    if platform is not None:
         return platform, PLATFORM_CORRELATION_THRESHOLD, platform
     return structural, CORRELATION_THRESHOLD, None
 
@@ -645,6 +674,7 @@ def _write_report(
     queue: List[AlphaRecord],
     cache: Optional[Dict[str, Dict[str, Any]]] = None,
     edges: Optional[List[Tuple[str, str, str]]] = None,
+    mock_rows_skipped: int = 0,
 ) -> None:
     cache = cache or {}
     edges = edges or []
@@ -655,6 +685,7 @@ def _write_report(
         "",
         f"- generated_at: {utc_now_iso()}",
         f"- alpha_count: {len(records)}",
+        f"- mock_rows_skipped: {mock_rows_skipped} (passed_alphas.csv rows with source=mock never enter selection)",
         f"- submitted_alpha_count: {len(submitted)}",
         f"- cluster_count: {len(clusters)}",
         f"- best_count: {len(best)}",

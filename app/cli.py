@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+import requests
+
 from app.api import RateLimiter, build_client
 from app.attribution import build_attribution
 from app.config import Settings
@@ -19,9 +21,14 @@ from app.research import (
     summarize_workflow_state,
 )
 from app.research_paths import research_paths
-from app.selection import load_passed_alpha_records, run_selection_pipeline
+from app.selection import load_passed_alpha_records, passed_alphas_path, run_selection_pipeline
 from app.simulator import SimulateRunner, render_metrics
 from app.validation import validate_candidate_from_memory
+
+# Failures that should end a command with ``error: ...`` and exit code 1 instead of a traceback: bad
+# input or research state (ValueError), the live client (RuntimeError / TimeoutError / requests), the
+# mock client (KeyError for an unknown result id) and the file system.
+CLI_ERRORS = (ValueError, KeyError, RuntimeError, TimeoutError, OSError, requests.RequestException)
 
 
 def make_parser() -> argparse.ArgumentParser:
@@ -39,6 +46,14 @@ def make_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--family", default="manual", help="Family name for --expression")
     simulate.add_argument("--candidate-id", default="", help="Candidate id for --expression")
     simulate.add_argument("--current-run", action="store_true", help="Overwrite outputs/current_run instead of creating outputs/runs/<run_id>")
+    simulate.add_argument(
+        "--allow-mock",
+        action="store_true",
+        help=(
+            "Smoke-test only: let the mock client run under WQ_DRY_RUN=true / WQ_CLIENT_MODE=mock. Rows written to "
+            "research/ are tagged source=mock and skipped by select-alphas; point WQ_RESEARCH_DIR at a temporary directory"
+        ),
+    )
     simulate.add_argument("--instrument-type", default=None, help="Override BRAIN instrumentType for this simulation")
     simulate.add_argument("--region", default=None, help="Override BRAIN region for this simulation")
     simulate.add_argument("--universe", default=None, help="Override BRAIN universe for this simulation")
@@ -74,6 +89,11 @@ def make_parser() -> argparse.ArgumentParser:
         help="Compare one candidate's metrics against its parent, family best, and global best",
     )
     attribute.add_argument("--candidate-id", default=None, help="Candidate id to attribute. Defaults to global best")
+    attribute.add_argument(
+        "--result-id",
+        default=None,
+        help="BRAIN alpha id to pick when the same candidate id was reused across families",
+    )
 
     research = subparsers.add_parser("research", help="Summarize the current research loop state")
     research.add_argument(
@@ -165,14 +185,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "fetch-correlations":
-        mock_client = settings.dry_run or settings.client_mode.lower() == "mock"
+        mock_client = _is_mock_client(settings)
         if mock_client and not args.allow_mock:
             parser.error(
                 "fetch-correlations needs a live BRAIN client: the mock client would cache empty results and disable the "
                 "submitted-alpha gate; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests, or pass --allow-mock for a smoke run"
             )
         paths = research_paths(settings.research_dir)
-        alpha_ids = args.alpha_id or [record.alpha_id for record in load_passed_alpha_records(paths.passed_alphas)]
+        alpha_ids = args.alpha_id or [record.alpha_id for record in load_passed_alpha_records(passed_alphas_path(settings.research_dir))]
         if not alpha_ids:
             parser.error("no alpha ids: pass --alpha-id or record passed alphas first")
         kinds = ("self", "prod") if args.kind == "both" else (args.kind,)
@@ -216,15 +236,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             "decision": args.decision,
         }
         if args.fetch_metrics:
-            if settings.dry_run or settings.client_mode.lower() == "mock":
+            if _is_mock_client(settings):
                 parser.error("--fetch-metrics needs a live BRAIN client; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests")
-            row = merge_fetched_metrics(row, client.fetch_result(args.result_id).as_dict())
-        written = record_passed_alpha(settings.research_dir, row, allow_duplicate=args.allow_duplicate)
+            try:
+                row = merge_fetched_metrics(row, client.fetch_result(args.result_id).as_dict())
+            except CLI_ERRORS as exc:
+                return _report_error(exc)
+        try:
+            written = record_passed_alpha(settings.research_dir, row, allow_duplicate=args.allow_duplicate)
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
         print(render_metrics_payload(written))
         return 0
 
     if args.command == "research":
-        report = summarize_workflow_state(settings.research_dir, requested_mode=args.mode)
+        try:
+            report = summarize_workflow_state(settings.research_dir, requested_mode=args.mode)
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
         print(render_metrics_payload(report))
         return 0
 
@@ -235,6 +264,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "simulate":
+        if _is_mock_client(settings) and not args.allow_mock:
+            parser.error(
+                "simulate needs a live BRAIN client: under WQ_DRY_RUN=true / WQ_CLIENT_MODE=mock the mock client would append "
+                "synthetic results to research/logs/* and family_memory.json; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests "
+                "(check with `python -m app settings`), or pass --allow-mock for a smoke run against a temporary WQ_RESEARCH_DIR"
+            )
+        if _is_mock_client(settings):
+            print(
+                f"warning: mock simulate; rows written under {settings.research_dir} are tagged source=mock and skipped by select-alphas",
+                file=sys.stderr,
+            )
         _apply_simulation_overrides(settings, args)
         if args.expression:
             candidate = AlphaCandidate(
@@ -250,17 +290,23 @@ def main(argv: Optional[List[str]] = None) -> int:
             input_path = temp_input
         else:
             input_path = Path(args.input) if args.input else settings.candidate_file
-        run_dir = SimulateRunner(settings, client).run(input_path, limit=args.limit, archive_run=not args.current_run)
+        try:
+            run_dir = SimulateRunner(settings, client).run(input_path, limit=args.limit, archive_run=not args.current_run)
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
         print(run_dir)
         return 0
 
     if args.command == "result":
-        metrics = client.fetch_result(args.result_id)
+        try:
+            metrics = client.fetch_result(args.result_id)
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
         print(render_metrics(metrics))
         return 0
 
     if args.command == "validate-candidate":
-        if args.refresh and (settings.dry_run or settings.client_mode.lower() == "mock"):
+        if args.refresh and _is_mock_client(settings):
             parser.error("--refresh needs a live BRAIN client; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests")
         try:
             report = validate_candidate_from_memory(
@@ -271,9 +317,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 refresh=args.refresh,
                 client=client if args.refresh else None,
             )
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
         print(render_metrics_payload(report))
         return 0
 
@@ -283,17 +328,34 @@ def main(argv: Optional[List[str]] = None) -> int:
             report = build_attribution(
                 load_family_memory(settings.research_dir),
                 args.candidate_id,
+                result_id=args.result_id,
                 decisions_path=paths.experiment_decisions,
                 csv_paths=(paths.passed_alphas, paths.failed_alphas),
             )
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+        except CLI_ERRORS as exc:
+            return _report_error(exc)
+        if report.get("warning"):
+            print(f"warning: {report['warning']}", file=sys.stderr)
         print(render_metrics_payload(report))
         return 0
 
     parser.error(f"Unknown command: {args.command}")
     return 2
+
+
+def _is_mock_client(settings: Settings) -> bool:
+    """Mirror ``build_client``: dry-run or an explicit mock mode means no live BRAIN API."""
+    return settings.dry_run or settings.client_mode.lower() == "mock"
+
+
+def _report_error(exc: BaseException) -> int:
+    """Print ``error: ...`` to stderr and return exit code 1. ValueError messages are already human text;
+    other exception types are prefixed with their class so a KeyError('alpha-1') stays understandable."""
+    if isinstance(exc, ValueError):
+        print(f"error: {exc}", file=sys.stderr)
+    else:
+        print(f"error: {exc.__class__.__name__}: {exc}", file=sys.stderr)
+    return 1
 
 
 def _init_data(settings: Settings) -> None:

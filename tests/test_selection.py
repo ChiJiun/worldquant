@@ -10,7 +10,7 @@ def _write_cache(research_dir, alphas):
     state_dir = research_dir / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     (state_dir / "alpha_correlations.json").write_text(
-        json.dumps({"version": 1, "alphas": alphas}),
+        json.dumps({"version": 2, "alphas": alphas}),
         encoding="utf-8",
     )
 
@@ -341,3 +341,104 @@ def test_pairwise_similarity_links_structural_duplicates_despite_low_platform_co
     assert pairwise_similarity(left, right, cache) == (0.95, 0.85, None)
     cache["alpha-1"]["self"]["records"][0]["correlation"] = -0.8
     assert pairwise_similarity(left, right, cache) == (0.8, 0.7, 0.8)
+
+
+def test_selection_skips_mock_rows_and_reports_their_count(tmp_path):
+    research_dir = tmp_path / "research"
+    output_dir = tmp_path / "outputs"
+    (research_dir / "logs").mkdir(parents=True)
+    (research_dir / "logs" / "passed_alphas.csv").write_text(
+        "\n".join(
+            [
+                PASSED_HEADER + ",source",
+                '2026-05-10T00:00:00Z,A1,price_volume,"rank(returns) + rank(volume / adv20)",alpha-1,1.5,1.3,0.10,0.05,0.20,validate_best_candidate,live',
+                '2026-05-10T00:01:00Z,OLD,news,"rank(ts_backfill(news_max_up_ret, 120))",alpha-2,1.5,1.2,0.09,0.04,0.18,validate_best_candidate,',
+                '2026-05-10T00:02:00Z,M1,manual,"rank(close)",eab2d49b17eb,1.54,1.5,0.09,0.01,0.13,validate_best_candidate,mock',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = run_selection_pipeline(research_dir, output_dir)
+
+    assert report["record_count"] == 2
+    assert report["mock_rows_skipped"] == 1
+    registry = (output_dir / "alpha_registry.csv").read_text(encoding="utf-8")
+    assert "eab2d49b17eb" not in registry
+    assert "alpha-2" in registry
+    queue = (output_dir / "submit_queue.csv").read_text(encoding="utf-8")
+    assert "eab2d49b17eb" not in queue
+    assert "mock_rows_skipped: 1" in (output_dir / "correlation_report.md").read_text(encoding="utf-8")
+
+
+def test_pairwise_similarity_reports_structural_score_when_neither_signal_crosses():
+    from app.selection import AlphaRecord, pairwise_similarity, structural_similarity
+
+    def record(alpha_id, expression, fields, core_signal):
+        return AlphaRecord(
+            alpha_id=alpha_id,
+            candidate_id=alpha_id,
+            expression=expression,
+            parent_alpha_id="",
+            workflow_type="x",
+            family="pv",
+            core_signal=core_signal,
+            fields=fields,
+            operators=["rank"],
+            lookbacks=[],
+            direction="mixed",
+            sharpe=1.0,
+            fitness=1.0,
+            returns=0.1,
+            turnover=0.2,
+            drawdown=0.05,
+        )
+
+    left = record("alpha-1", "rank(close)", ["close"], "price_volume_flow")
+    right = record("alpha-2", "rank(news_max_up_ret)", ["news_max_up_ret"], "news_event_response")
+    structural = structural_similarity(left, right)
+    assert structural < 0.85
+    cache = {"alpha-1": {"self": {"max_correlation": 0.1, "records": [{"id": "alpha-2", "correlation": 0.1}]}}}
+
+    assert pairwise_similarity(left, right, cache) == (structural, 0.85, None)
+    assert pairwise_similarity(left, right, None) == (structural, 0.85, None)
+
+
+def test_recommendation_omits_platform_fetched_at_when_cache_entry_is_valueless(tmp_path):
+    research_dir = tmp_path / "research"
+    output_dir = tmp_path / "outputs"
+    (research_dir / "logs").mkdir(parents=True)
+    (research_dir / "submissions").mkdir(parents=True)
+    (research_dir / "logs" / "passed_alphas.csv").write_text(
+        "\n".join(
+            [
+                PASSED_HEADER,
+                '2026-05-10T00:00:00Z,A1,price_volume,"rank(returns) + rank(volume / adv20)",alpha-1,1.5,1.3,0.10,0.05,0.20,validate_best_candidate',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (research_dir / "submissions" / "submitted_alphas.csv").write_text(
+        "\n".join(
+            [
+                "alpha_id,candidate_id,family,expression,sharpe,fitness,returns,drawdown,turnover",
+                'submitted-1,S1,price_volume,"rank(returns) + rank(volume / adv20)",1.4,1.2,0.09,0.05,0.20',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_cache(
+        research_dir,
+        {"alpha-1": {"self": {"max_correlation": None, "records": [], "fetched_at": "2026-05-01T00:00:00Z"}}},
+    )
+
+    report = run_selection_pipeline(research_dir, output_dir)
+
+    assert report["submit_queue_count"] == 0
+    assert report["platform_correlation_alpha_count"] == 0
+    recommendations = (output_dir / "final_alpha_recommendations.md").read_text(encoding="utf-8")
+    assert "reason=structural_high (structural proxy)" in recommendations
+    assert "fetched_at=" not in recommendations

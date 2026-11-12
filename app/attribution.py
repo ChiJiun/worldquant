@@ -71,13 +71,18 @@ def compare_metrics(current: Any, reference: Any) -> Dict[str, Any]:
         "unchanged": unchanged,
         "missing": missing,
         "deltas": deltas,
-        "verdict": verdict(improved, worsened),
+        "verdict": verdict(improved, worsened, unchanged),
     }
 
 
-def verdict(improved: List[str], worsened: List[str]) -> str:
+def verdict(improved: List[str], worsened: List[str], unchanged: Sequence[str] = ()) -> str:
+    """Summarize a comparison.
+
+    ``incomparable`` means not a single metric could be compared (the reference is an error row or a
+    snapshot without metrics); ``unchanged`` means every comparable metric was identical.
+    """
     if not improved and not worsened:
-        return "unchanged"
+        return "unchanged" if unchanged else "incomparable"
     if improved and not worsened:
         return "net_improvement"
     if worsened and not improved:
@@ -96,15 +101,19 @@ def find_candidate(
     candidate_id: str,
     decisions_path: Optional[Path] = None,
     csv_paths: Sequence[Path] = (),
+    *,
+    result_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Locate the latest snapshot of ``candidate_id``.
 
     Search order: family memory (recent candidates, family bests, global best), then the decisions log,
     then the passed/failed alpha CSVs. The CSVs matter for alphas that were recorded manually with
-    ``record-passed-alpha`` and therefore never went through the recorder.
+    ``record-passed-alpha`` and therefore never went through the recorder. ``result_id`` (the BRAIN
+    alpha id) narrows the search when the same ``candidate_id`` was reused for different alphas.
     """
     if not candidate_id:
         return None
+    wanted_result = str(result_id or "").strip()
     families = memory.get("families", {}) if isinstance(memory, dict) else {}
     families = families if isinstance(families, dict) else {}
     for family in families.values():
@@ -112,36 +121,70 @@ def find_candidate(
             continue
         recent = [item for item in family.get("recent_candidates", []) if isinstance(item, dict)]
         for snapshot in reversed(recent):
-            if snapshot.get("candidate_id") == candidate_id:
+            if snapshot_matches(snapshot, candidate_id, wanted_result):
                 return snapshot
     for family in families.values():
         best = family.get("best_candidate") if isinstance(family, dict) else None
-        if isinstance(best, dict) and best.get("candidate_id") == candidate_id:
+        if snapshot_matches(best, candidate_id, wanted_result):
             return best
     global_best = memory.get("global_best") if isinstance(memory, dict) else None
-    if isinstance(global_best, dict) and global_best.get("candidate_id") == candidate_id:
+    if snapshot_matches(global_best, candidate_id, wanted_result):
         return global_best
     if decisions_path is not None:
-        found = find_in_decisions(decisions_path, candidate_id)
+        found = find_in_decisions(decisions_path, candidate_id, result_id=wanted_result)
         if found is not None:
             return found
     for csv_path in csv_paths:
-        found = find_in_alpha_csv(csv_path, candidate_id)
+        found = find_in_alpha_csv(csv_path, candidate_id, result_id=wanted_result)
         if found is not None:
             return found
     return None
 
 
-def find_in_alpha_csv(path: Path, candidate_id: str) -> Optional[Dict[str, Any]]:
-    """Latest passed/failed_alphas.csv row for ``candidate_id`` rebuilt as a snapshot with flat metrics."""
+def snapshot_matches(snapshot: Any, candidate_id: Optional[str], result_id: Optional[str] = None) -> bool:
+    """True when ``snapshot`` carries ``candidate_id`` (if given) and ``result_id`` (if given)."""
+    if not isinstance(snapshot, dict):
+        return False
+    if candidate_id and snapshot.get("candidate_id") != candidate_id:
+        return False
+    wanted_result = str(result_id or "").strip()
+    return not wanted_result or str(snapshot.get("result_id") or "").strip() == wanted_result
+
+
+def families_with_candidate(memory: Dict[str, Any], candidate_id: str) -> List[str]:
+    """Family names whose snapshots carry ``candidate_id``; more than one means the id was reused."""
+    if not candidate_id:
+        return []
+    names: List[str] = []
+    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
+    for name, family in sorted(families.items()):
+        if not isinstance(family, dict):
+            continue
+        snapshots = [family.get("best_candidate")] + list(family.get("recent_candidates", []) or [])
+        if any(isinstance(item, dict) and item.get("candidate_id") == candidate_id for item in snapshots):
+            names.append(str(name))
+    return names
+
+
+def find_in_alpha_csv(path: Path, candidate_id: str, *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Latest passed/failed_alphas.csv row for ``candidate_id`` rebuilt as a snapshot with flat metrics.
+
+    Rows without a single metric (platform-error rows in ``failed_alphas.csv``) are skipped: they
+    carry nothing to compare against, and an earlier row of the same candidate usually does.
+    """
     if not candidate_id or not path.exists():
         return None
+    wanted_result = str(result_id or "").strip()
     found: Optional[Dict[str, Any]] = None
     with path.open("r", encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
             if str(row.get("candidate_id") or "").strip() != candidate_id:
                 continue
+            if wanted_result and str(row.get("result_id") or "").strip() != wanted_result:
+                continue
             metrics = {name: _float(row.get(name)) for name in ATTRIBUTION_METRICS if row.get(name) not in (None, "")}
+            if not any(value is not None for value in metrics.values()):
+                continue
             found = {
                 "candidate_id": candidate_id,
                 "family": row.get("family"),
@@ -154,10 +197,11 @@ def find_in_alpha_csv(path: Path, candidate_id: str) -> Optional[Dict[str, Any]]
     return found
 
 
-def find_in_decisions(path: Path, candidate_id: str) -> Optional[Dict[str, Any]]:
+def find_in_decisions(path: Path, candidate_id: str, *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Latest `experiment_decisions.jsonl` row for ``candidate_id`` that carries metrics."""
     if not candidate_id or not path.exists():
         return None
+    wanted_result = str(result_id or "").strip()
     found: Optional[Dict[str, Any]] = None
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
@@ -167,8 +211,11 @@ def find_in_decisions(path: Path, candidate_id: str) -> Optional[Dict[str, Any]]
             row = json.loads(stripped)
         except json.JSONDecodeError:
             continue
-        if isinstance(row, dict) and row.get("candidate_id") == candidate_id and isinstance(row.get("metrics"), dict):
-            found = row
+        if not isinstance(row, dict) or row.get("candidate_id") != candidate_id or not isinstance(row.get("metrics"), dict):
+            continue
+        if wanted_result and str(row.get("result_id") or "").strip() != wanted_result:
+            continue
+        found = row
     return found
 
 
@@ -176,17 +223,27 @@ def build_attribution(
     memory: Dict[str, Any],
     candidate_id: Optional[str] = None,
     *,
+    result_id: Optional[str] = None,
     decisions_path: Optional[Path] = None,
     csv_paths: Sequence[Path] = (),
 ) -> Dict[str, Any]:
-    """Compare a candidate with its parent, its family best and the global best."""
+    """Compare a candidate with its parent, its family best and the global best.
+
+    ``result_id`` picks one alpha when ``candidate_id`` was reused across families; without it the
+    report carries a ``warning`` naming the families and the ``result_id`` that was used.
+    """
+    wanted_result = str(result_id or "").strip()
     if candidate_id:
-        candidate = find_candidate(memory, candidate_id, decisions_path, csv_paths)
+        candidate = find_candidate(memory, candidate_id, decisions_path, csv_paths, result_id=wanted_result)
     else:
         global_best = memory.get("global_best")
-        candidate = global_best if isinstance(global_best, dict) else None
+        candidate = global_best if snapshot_matches(global_best, None, wanted_result) else None
     if candidate is None:
-        raise ValueError(f"Candidate not found in research memory: {candidate_id or '<global_best>'}")
+        wanted = candidate_id or "<global_best>"
+        if wanted_result:
+            wanted += f" (result_id={wanted_result})"
+        raise ValueError(f"Candidate not found in research memory: {wanted}")
+    duplicate_families = families_with_candidate(memory, str(candidate.get("candidate_id") or ""))
 
     metadata = candidate_metadata(candidate)
     if not metadata and decisions_path is not None:
@@ -224,6 +281,11 @@ def build_attribution(
     }
     report["verdict"] = str(vs_parent.get("verdict") or vs_parent.get("status"))
     report["next_action_hint"] = _hint(report["verdict"], report["changed_dimension"])
+    if len(duplicate_families) > 1 and not wanted_result:
+        report["warning"] = (
+            f"candidate_id {candidate.get('candidate_id')} appears in families {duplicate_families}; "
+            f"using result_id {candidate.get('result_id')} (pass --result-id to pick another alpha)"
+        )
     return report
 
 
@@ -246,6 +308,7 @@ def _hint(verdict_label: str, changed_dimension: str) -> str:
         "regression_with_trade_off": f"{dim} hurt the core metrics; revert to the parent and try a different dimension.",
         "regression": f"Revert {dim}; every available metric got worse.",
         "unchanged": f"{dim} had no measurable effect; drop it and test a different dimension.",
+        "incomparable": "The parent has no comparable metrics (an error row or a snapshot without metrics); only family/global comparisons are available.",
         "no_parent_recorded": "Record parent_candidate_id and changed_dimension in data/candidates.jsonl so the next experiment can be attributed.",
         "parent_not_found": "Parent id is not in research memory, the decisions log, or the passed/failed alpha CSVs; only family/global comparisons are available.",
     }.get(verdict_label, "Review the metric deltas before the next experiment.")

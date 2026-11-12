@@ -56,3 +56,24 @@ def test_simulate_runner_can_overwrite_current_run(settings):
     assert second_run_dir == run_dir
     assert (second_run_dir / "results.jsonl").read_text(encoding="utf-8").count("\n") == 1
     assert marker.exists()
+
+
+def test_simulate_runner_reports_mock_source_in_summary_and_research_rows(settings):
+    import csv
+
+    settings.ensure_directories()
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A1","family":"manual","expression":"rank(close)"}\n',
+        encoding="utf-8",
+    )
+    runner = SimulateRunner(settings, MockBrainClient(RateLimiter(0.0)))
+
+    run_dir = runner.run(settings.candidate_file)
+
+    assert runner.source == "mock"
+    assert json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))["source"] == "mock"
+    paths = research_paths(settings.research_dir)
+    rows = list(csv.DictReader(paths.passed_alphas.open(encoding="utf-8", newline="")))
+    assert rows[0]["source"] == "mock"
+    decision = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
+    assert decision["source"] == "mock"

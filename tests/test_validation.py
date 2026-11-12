@@ -157,7 +157,7 @@ def _memory_with_pending_self_corr(research_dir, result_id="alpha-1"):
 def _write_cache(research_dir, alpha_id, max_corr):
     (research_dir / "state").mkdir(parents=True, exist_ok=True)
     (research_dir / "state" / "alpha_correlations.json").write_text(
-        json.dumps({"version": 1, "alphas": {alpha_id: {"self": {"max_correlation": max_corr, "records": []}}}}),
+        json.dumps({"version": 2, "alphas": {alpha_id: {"self": {"max_correlation": max_corr, "records": []}}}}),
         encoding="utf-8",
     )
 
@@ -325,7 +325,7 @@ def test_validate_candidate_cached_self_corr_reports_fetched_at(tmp_path):
     research_dir = tmp_path / "research"
     _memory_with_pending_self_corr(research_dir)
     (research_dir / "state" / "alpha_correlations.json").write_text(
-        json.dumps({"version": 1, "alphas": {"alpha-1": {"self": {"max_correlation": 0.2, "records": [], "fetched_at": "2026-05-01T00:00:00Z"}}}}),
+        json.dumps({"version": 2, "alphas": {"alpha-1": {"self": {"max_correlation": 0.2, "records": [], "fetched_at": "2026-05-01T00:00:00Z"}}}}),
         encoding="utf-8",
     )
 
@@ -334,3 +334,24 @@ def test_validate_candidate_cached_self_corr_reports_fetched_at(tmp_path):
     assert report["checks"]["self_corr"]["status"] == "pass"
     assert report["checks"]["self_corr"]["fetched_at"] == "2026-05-01T00:00:00Z"
     assert "fetched_at=2026-05-01T00:00:00Z" in report["checks"]["self_corr"]["reason"]
+
+
+def test_validate_candidate_result_id_alone_searches_every_family(tmp_path):
+    import pytest
+
+    research_dir = tmp_path / "research"
+    candidate = _memory_with_pending_self_corr(research_dir)
+    memory_path = research_dir / "state" / "family_memory.json"
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    other = dict(candidate, candidate_id="OTHER", family="g", expression="rank(volume)", result_id="alpha-9", metrics={"fitness": 0.4, "raw": {}})
+    memory["families"]["g"] = {"best_candidate": other, "recent_candidates": [other]}
+    memory_path.write_text(json.dumps(memory), encoding="utf-8")
+
+    report = validate_candidate_from_memory(research_dir, result_id="alpha-9")
+
+    assert report["candidate_id"] == "OTHER"
+    assert report["result_id"] == "alpha-9"
+    assert report["expression"] == "rank(volume)"
+
+    with pytest.raises(ValueError, match=r"<any candidate> \(result_id=alpha-404\)"):
+        validate_candidate_from_memory(research_dir, result_id="alpha-404")
