@@ -14,6 +14,7 @@ Runtime artifacts are intentionally ignored by git.
 | Final selection state | `research/state/latest_final_selection_report.json` | selection finalize |
 | Final selection history | `research/logs/final_selection_reports.jsonl` | selection finalize |
 | Submission tracker | `research/submissions/submitted_alphas.csv` | manual / submission workflow |
+| Correlation cache | `research/state/alpha_correlations.json` | `fetch-correlations` command |
 | Working notes | `research/notes/hypotheses.md` | researcher |
 
 If a result should be shared, summarize it in `docs/` or place a sanitized miniature example under `research/examples/`.
@@ -26,6 +27,10 @@ If a result should be shared, summarize it in `docs/` or place a sanitized minia
 2. rejecting winners whose expression fingerprint drifts away from the family/hypothesis economic meaning,
 3. rejecting winners that are highly similar to already submitted alphas in `research/submissions/submitted_alphas.csv`.
 
-Submitted alpha rows should include at least `alpha_id` and `expression`. Optional metric columns such as `sharpe`, `fitness`, `returns`, `drawdown`, and `turnover` improve metric-proxy similarity checks.
+Submitted alpha rows should include at least `alpha_id` and `expression`. When `research/state/alpha_correlations.json` holds a BRAIN self-correlation entry for a candidate, that platform number (threshold 0.7) replaces the structural comparison against this CSV; the CSV is still used to attach the local record of the matching submitted alpha and as the fallback when no platform data is cached.
+
+## Correlation Cache
+
+`python -m app fetch-correlations` stores `{"version": 1, "updated_at": ..., "alphas": {alpha_id: {"self": {...}, "prod": {...}}}}`. Each entry keeps `max_correlation`, `min_correlation`, `record_count`, `records` (schema-zipped rows from BRAIN) and `fetched_at`. Pairwise clustering uses `|correlation|` from the `self` records; the submit gate uses the signed `max_correlation`.
 
 Use `--finalize-run` to write the structured final state. Use `--clear-candidates` only after the current candidate input has already been simulated and selected. `passed_alphas.csv` remains cumulative because removing it would erase the candidate pool needed for future clustering.

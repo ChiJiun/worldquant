@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import hashlib
 
 
@@ -58,4 +58,28 @@ class SimulationMetrics:
             "margin": self.margin,
             "checks_failed": self.checks_failed,
             "raw": self.raw,
+        }
+
+
+@dataclass
+class CorrelationResult:
+    """One BRAIN correlation payload (self or prod) for a single alpha."""
+
+    alpha_id: str
+    kind: str
+    max_correlation: Optional[float]
+    min_correlation: Optional[float]
+    records: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict)
+    fetched_at: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "alpha_id": self.alpha_id,
+            "kind": self.kind,
+            "max_correlation": self.max_correlation,
+            "min_correlation": self.min_correlation,
+            "record_count": len(self.records),
+            "records": self.records,
+            "fetched_at": self.fetched_at,
         }

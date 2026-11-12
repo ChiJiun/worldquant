@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import hashlib
 import logging
 import random
+import time
 
 import requests
 from requests.auth import HTTPBasicAuth
 
 from app.api.rate_limiter import RateLimiter
 from app.config import Settings
-from app.models import AlphaCandidate, SimulationHandle, SimulationMetrics, utc_now_iso
+from app.correlations import parse_correlation_payload
+from app.models import AlphaCandidate, CorrelationResult, SimulationHandle, SimulationMetrics, utc_now_iso
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +33,14 @@ class BrainClient(ABC):
 
     @abstractmethod
     def fetch_result(self, result_id: str) -> SimulationMetrics:
+        raise NotImplementedError
+
+    @abstractmethod
+    def fetch_self_correlation(self, alpha_id: str) -> CorrelationResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    def fetch_prod_correlation(self, alpha_id: str) -> CorrelationResult:
         raise NotImplementedError
 
 
@@ -105,6 +115,59 @@ class RequestsBrainClient(BrainClient):
             raise RuntimeError(f"Simulation result fetch failed: status={response.status_code} body={response.text[:1000]}")
         data = self._safe_json(response)
         return self._metrics_from_flat(result_id, data)
+
+    def fetch_self_correlation(self, alpha_id: str) -> CorrelationResult:
+        return self._fetch_correlation(alpha_id, "self", self.settings.api_self_corr_path)
+
+    def fetch_prod_correlation(self, alpha_id: str) -> CorrelationResult:
+        return self._fetch_correlation(alpha_id, "prod", self.settings.api_prod_corr_path)
+
+    def _fetch_correlation(self, alpha_id: str, kind: str, path_template: str) -> CorrelationResult:
+        """GET a correlation endpoint, honouring BRAIN's Retry-After while the platform computes it."""
+        if not self.logged_in:
+            self.login()
+        path = path_template.format(alpha_id=alpha_id)
+        last_status: Optional[int] = None
+        for _ in range(self.settings.max_poll_attempts):
+            response = self._get(path)
+            if response.status_code in {401, 403}:
+                self.logged_in = False
+                self.login()
+                response = self._get(path)
+            last_status = response.status_code
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"{kind} correlation fetch failed for {alpha_id}: status={response.status_code} body={response.text[:1000]}"
+                )
+            data = self._safe_json(response)
+            retry_after = self._header(response, "Retry-After")
+            if retry_after is not None and not self._has_correlation_payload(data):
+                time.sleep(self._retry_delay(retry_after))
+                continue
+            return parse_correlation_payload(alpha_id, kind, data)
+        raise TimeoutError(
+            f"{kind} correlation for {alpha_id} was still computing after {self.settings.max_poll_attempts} polls (last status={last_status})"
+        )
+
+    def _retry_delay(self, retry_after: str) -> float:
+        try:
+            delay = float(retry_after)
+        except (TypeError, ValueError):
+            delay = self.settings.poll_interval_seconds
+        return max(0.0, min(delay, self.settings.poll_interval_seconds * 2 if self.settings.poll_interval_seconds > 0 else delay))
+
+    @staticmethod
+    def _has_correlation_payload(data: Dict[str, Any]) -> bool:
+        return bool(data.get("records")) or data.get("max") is not None or data.get("min") is not None
+
+    @staticmethod
+    def _header(response: requests.Response, name: str) -> Optional[str]:
+        headers = getattr(response, "headers", None)
+        try:
+            value = headers.get(name) if headers is not None else None
+        except AttributeError:
+            return None
+        return str(value) if isinstance(value, (str, int, float)) else None
 
     def _auth_attempts(self) -> List[str]:
         mode = self.settings.auth_mode.lower()
@@ -201,6 +264,7 @@ class MockBrainClient(BrainClient):
         self.rate_limiter = rate_limiter or RateLimiter(0.0)
         self.random = random.Random(23)
         self.results: Dict[str, SimulationMetrics] = {}
+        self.correlation_payloads: Dict[Tuple[str, str], Dict[str, Any]] = {}
         self.last_login_mode = "mock"
 
     def login(self) -> None:
@@ -231,6 +295,18 @@ class MockBrainClient(BrainClient):
     def fetch_result(self, result_id: str) -> SimulationMetrics:
         self.rate_limiter.wait()
         return self.results[result_id]
+
+    def fetch_self_correlation(self, alpha_id: str) -> CorrelationResult:
+        return self._mock_correlation(alpha_id, "self")
+
+    def fetch_prod_correlation(self, alpha_id: str) -> CorrelationResult:
+        return self._mock_correlation(alpha_id, "prod")
+
+    def _mock_correlation(self, alpha_id: str, kind: str) -> CorrelationResult:
+        """Return a preset payload when a test registered one, otherwise an empty, uncorrelated result."""
+        self.rate_limiter.wait()
+        payload = self.correlation_payloads.get((alpha_id, kind), {"max": 0.0, "min": 0.0, "records": [], "mode": "mock"})
+        return parse_correlation_payload(alpha_id, kind, payload)
 
 
 def build_client(settings: Settings, rate_limiter: RateLimiter) -> BrainClient:

@@ -1,5 +1,7 @@
 from unittest.mock import Mock
 
+import pytest
+
 from app.api import MockBrainClient, RateLimiter, RequestsBrainClient
 from app.models import AlphaCandidate
 
@@ -120,3 +122,72 @@ def test_requests_client_fetch_result_parses_nested_is_checks(settings):
 
     assert metrics.sharpe == 0.94
     assert metrics.checks_failed == 1
+
+
+def _correlation_response(status_code=200, payload=None, retry_after=None):
+    response = Mock(status_code=status_code, content=b"{}" if payload is not None else b"", text="")
+    response.json.return_value = payload if payload is not None else {}
+    response.headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return response
+
+
+def test_requests_client_waits_for_retry_after_then_parses_self_correlation(settings, monkeypatch):
+    settings.auth_mode = "basic"
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    client.logged_in = True
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    payload = {
+        "schema": {"properties": [{"name": "id"}, {"name": "correlation"}]},
+        "records": [["alpha-9", 0.74]],
+        "max": 0.74,
+        "min": 0.74,
+    }
+    client.session.get = Mock(side_effect=[
+        _correlation_response(retry_after="2.5"),
+        _correlation_response(payload=payload),
+    ])
+
+    result = client.fetch_self_correlation("alpha-1")
+
+    assert result.max_correlation == 0.74
+    assert result.records == [{"id": "alpha-9", "correlation": 0.74}]
+    assert sleeps == [2.5]
+    called_paths = [call.args[0] for call in client.session.get.call_args_list]
+    assert called_paths == ["https://example.com/alphas/alpha-1/correlations/self"] * 2
+
+
+def test_requests_client_prod_correlation_uses_prod_path_and_raises_on_error(settings):
+    settings.auth_mode = "basic"
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    client.logged_in = True
+    client.session.get = Mock(return_value=Mock(status_code=404, text="missing", content=b""))
+
+    with pytest.raises(RuntimeError, match="prod correlation fetch failed"):
+        client.fetch_prod_correlation("alpha-1")
+    assert client.session.get.call_args.args[0] == "https://example.com/alphas/alpha-1/correlations/prod"
+
+
+def test_requests_client_correlation_times_out_when_platform_keeps_computing(settings, monkeypatch):
+    settings.auth_mode = "basic"
+    settings.max_poll_attempts = 2
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    client.logged_in = True
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: None)
+    client.session.get = Mock(return_value=_correlation_response(retry_after="1"))
+
+    with pytest.raises(TimeoutError, match="still computing"):
+        client.fetch_self_correlation("alpha-1")
+
+
+def test_mock_client_returns_preset_or_empty_correlation():
+    client = MockBrainClient(RateLimiter(0.0))
+    client.correlation_payloads[("alpha-1", "self")] = {"max": 0.9, "records": [{"id": "alpha-2", "correlation": 0.9}]}
+
+    preset = client.fetch_self_correlation("alpha-1")
+    empty = client.fetch_prod_correlation("alpha-1")
+
+    assert preset.max_correlation == 0.9
+    assert preset.records[0]["id"] == "alpha-2"
+    assert empty.max_correlation == 0.0
+    assert empty.records == []
