@@ -154,6 +154,14 @@ WQ_DRY_RUN=true
 WQ_CLIENT_MODE=requests
 ```
 
+注意：dry-run 的 `simulate` 不會被擋，mock 結果會照常寫進 `research/logs/*` 與 `family_memory.json`，而且 passed/failed CSV 上沒有 mock 標記（`result_id` 是 expression 的 md5 前 12 碼）。要跑通流程時把路徑指到暫存目錄，不要對真實研究資料跑：
+
+```env
+WQ_RESEARCH_DIR=C:\tmp\wq-smoke\research
+WQ_OUTPUT_DIR=C:\tmp\wq-smoke\outputs
+WQ_CANDIDATE_FILE=C:\tmp\wq-smoke\candidates.jsonl
+```
+
 要打 live API 時：
 
 ```env

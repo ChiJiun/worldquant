@@ -25,13 +25,13 @@ The same workflow exists for Codex under `.codex/skills/worldquant-researcher-wo
 
 With no mode, infer it from research memory and the latest artifacts (`python -m app research --mode auto` prints the deterministic view). If the explicit mode and the memory state conflict, follow the explicit mode unless it would violate a hard stop condition.
 
-Run every command with the interpreter that has this project installed (`.venv\Scripts\python.exe -m app ...` here; README examples use the Anaconda interpreter). `python -m app` below means that interpreter.
+Run every command with the interpreter that has this project installed (`.venv\Scripts\python.exe -m app ...` in the main checkout; a worktree has no `.venv`, and README examples use the Anaconda interpreter). `python -m app` below means that interpreter.
 
 ## Safety
 
 - `.env` holds the user's BRAIN credentials. Never read, print, copy or commit its values; `python -m app settings` shows only `has_username` / `has_password`.
 - `simulate`, `login-check`, `result`, `fetch-correlations`, `validate-candidate --refresh` and `record-passed-alpha --fetch-metrics` talk to the live BRAIN API when `WQ_DRY_RUN=false`. Run them only because the user asked for this workflow to run; never inside tests or as a "quick check".
-- `WQ_DRY_RUN=true` is the program default and what `.env.example` ships with. Under it every command uses `MockBrainClient`. Only three live-only calls are refused outright (`fetch-correlations` without `--allow-mock`, `record-passed-alpha --fetch-metrics`, `validate-candidate --refresh`); **`simulate` is not refused** and still appends mock results (`result_id=mock-...`, `raw.mode=mock`) to `research/logs/*` and `research/state/family_memory.json`, and `select-alphas` does not filter them out. Before step 5 run `python -m app settings` and confirm `dry_run=False` and `client_mode=requests`; if it says `dry_run=True`, stop and ask the user instead of simulating.
+- `WQ_DRY_RUN=true` is the program default and what `.env.example` ships with. Under it every command uses `MockBrainClient`. Only three live-only calls are refused outright (`fetch-correlations` without `--allow-mock`, `record-passed-alpha --fetch-metrics`, `validate-candidate --refresh`); **`simulate` is not refused** and still appends mock results to `research/logs/*` and `research/state/family_memory.json`, and `select-alphas` does not filter them out (only `global_best` yields to a real result later). The mock marker is visible only in `experiment_decisions.jsonl` and `family_memory.json` metrics (`raw.mode=mock`, `metrics.alpha_id=mock-...`); the `result_id` written to `passed_alphas.csv` / `failed_alphas.csv` is the first 12 hex chars of the expression's md5, so **the CSVs carry no mock marker** and a row can only be identified by joining `result_id` back to the decisions log. Before step 5 run `python -m app settings` and confirm `dry_run=False` and `client_mode=requests`; if it says `dry_run=True`, stop and ask the user instead of simulating. For a deliberate dry-run smoke test point `WQ_RESEARCH_DIR`, `WQ_OUTPUT_DIR` and `WQ_CANDIDATE_FILE` at a temporary directory.
 - Do not edit files under `research/state/` or `research/logs/` by hand; the recorder owns them. Hand-maintained files are `research/notes/` and `research/submissions/submitted_alphas.csv` (one row per real submission); manually verified alphas go through `python -m app record-passed-alpha`.
 
 ## Core Rule
@@ -87,7 +87,7 @@ Perform one loop at a time. The overall workflow stops only when a pass-worthy c
    - Preserve the family mechanism. Use only fields/operators listed in `config/fields.json`. Do not copy public formulas directly.
    - Do not use `rank()` when amplitude is the edge unless prior reflection asks for it. Do not add filters unless the dominant bottleneck justifies it.
 
-4. **Write or overwrite one candidate in `data/candidates.jsonl`** with `candidate_id`, `family`, `expression`, `parent_candidate_id`, `changed_dimension`, `notes`, and optionally `simulation_settings`. `parent_candidate_id` and `changed_dimension` are what make the parent comparison work: without them `attribute` and the recorder's `latest_vs_parent` report `no_parent_recorded` (family-best and global-best comparisons still run) and no family lesson is derived for the round.
+4. **Write or overwrite one candidate in `data/candidates.jsonl`** with `candidate_id`, `family`, `expression`, `parent_candidate_id`, `changed_dimension`, `notes`, and optionally `simulation_settings`. `parent_candidate_id` is what makes the parent comparison work: without it `attribute` and the recorder's `latest_vs_parent` report `no_parent_recorded` (family-best and global-best comparisons still run). The recorder derives a family lesson only when both `parent_candidate_id` and `changed_dimension` are present.
 
    ```json
    {

@@ -37,6 +37,8 @@ Python and BRAIN own deterministic work:
 
 ```text
 candidate IO -> simulation submit/poll/result -> metrics parsing -> artifacts
+-> attribution (python -m app attribute) -> validation (python -m app validate-candidate)
+-> correlation gate (python -m app fetch-correlations / select-alphas)
 ```
 
 ## Required State Read
@@ -107,9 +109,10 @@ Perform one loop at a time.
    - `changed_dimension`
    - `notes`
 
-5. Run at most one simulation unless the user explicitly asks for a batch:
+5. Run at most one simulation unless the user explicitly asks for a batch. First confirm the client is live: `settings` must show `dry_run=False` and `client_mode=requests`, because a dry-run `simulate` is not refused and writes mock rows into `research/` (the passed/failed CSVs carry no mock marker). If it shows `dry_run=True`, stop and ask the user.
 
 ```powershell
+C:\Users\USER\anaconda3\python.exe -m app settings
 C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1 --current-run
 ```
 
