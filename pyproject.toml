@@ -11,6 +11,11 @@ dependencies = [
   "requests>=2.31",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
 

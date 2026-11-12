@@ -141,7 +141,7 @@ WQ_MAX_POLL_ATTEMPTS=120
 WQ_POLL_INTERVAL_SECONDS=5.0
 ```
 
-`WQ_REQUEST_TIMEOUT_SECONDS` 是單次 HTTP request timeout。  
+`WQ_REQUEST_TIMEOUT_SECONDS` 是單次 HTTP request timeout。
 `WQ_MAX_POLL_ATTEMPTS * WQ_POLL_INTERVAL_SECONDS` 是每條 simulation 最多等待時間。
 
 ## 命令
@@ -317,11 +317,37 @@ LLM researcher 可以把 simulation setting 當成實驗維度，但一輪只能
 C:\Users\USER\anaconda3\python.exe -m app result <alpha_or_result_id>
 ```
 
+手動補登一條已驗證的 passed alpha（取代以前散落在根目錄的 append_*.py 腳本）：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app record-passed-alpha `
+  --candidate-id BLUE_SYNERGY_001 `
+  --family blue_ocean_hybrid_synthesis `
+  --expression "ts_decay_linear(rank(close), 10)" `
+  --result-id O0ovlO0R `
+  --sharpe 1.28 --fitness 0.87 --returns 0.0577 --drawdown 0.085 --turnover 0.0582
+```
+
+規則：
+
+- `recorded_at` 預設為現在的 UTC 時間，可用 `--recorded-at` 指定。
+- `--decision` 只接受 `validate_best_candidate` 或 `promote_candidate`，確保這張表只放通過 pass gate 的 alpha。
+- 同一個 `--result-id` 已存在時會拒絕寫入，除非加 `--allow-duplicate`。
+- 加 `--fetch-metrics` 會用 `--result-id` 從 BRAIN 補齊沒在命令列指定的指標（需要 live client）。
+
 跑測試：
 
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m pytest
 ```
+
+開發環境安裝（含 pytest）：
+
+```powershell
+python -m pip install -e ".[dev]"
+```
+
+GitHub Actions 會在每個 PR 與 `main` 的 push 上執行 `pytest`（見 `.github/workflows/ci.yml`）。
 
 ## 寫入規則
 
@@ -363,24 +389,9 @@ $worldquant-researcher-workflow
 workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針對既有 pass alpha 做改善。
 如果之後要做成明確的 Python 指令，再另外加 `python -m app research --mode ...` 類型的入口。
 
-### prompt
+### 研究員 prompt
 
-從.codex讀取 worldquant 量化研究員的skill，遵循其workflow，不斷尋找alpha，務必找到fitness>2.0的alpha
-
----
-
-並遵循以下流程：
-1️. **上網搜索**文獻研究與異常發現搜尋學術論文、量化部落格、因子投資研究識別市場機制與可觀察模式
-2️. 假說形式化將研究發現轉為可測試的假說明確指定所需的 fields 和 operators
-3️. Alpha 表達式設計使用 WorldQuant BRAIN 語法設計 alpha遵循 one-change-per-experiment 原則
-4️. 回測執行與結果分析透過 simulator 運行回測使用 21 種標準失敗標籤分類
-5️. 變體生成與迭代6 種變體策略（參數掃描、算子替換、欄位替換等）追蹤父子關係進行歸因分析
-6️. 驗證與過擬合檢查7項驗證測試（樣外測試、參數敏感度、交易成本等）計算信心分數
-7️. 相關性聚類與最優選擇以 0.7 相關性閾值聚類從每群中選出最佳代表（考慮IS、turnover、robustness）計算最終投資組合
-
----
-
-指標記得要幫我做相關性聚類的最優篩選，還要考慮在OS會不會是全域最優，不要在IS overfit，在portolio的檔案用來保存最佳因子
+給 LLM 當 WorldQuant BRAIN 資深量化研究員的完整 prompt 放在 `docs/researcher-prompt.md`。它描述研究流程、硬性限制與輸出格式；要調整研究行為時改那份文件，不要把 prompt 內容複製進 README。
 
 ### Submit Queue Gate
 
