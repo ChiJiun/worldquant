@@ -7,6 +7,8 @@ import json
 from app.models import CorrelationResult, utc_now_iso
 
 CACHE_VERSION = 1
+# BRAIN's SELF_CORRELATION submission check fails at or above this value.
+SELF_CORRELATION_THRESHOLD = 0.7
 RECORD_ID_KEYS = ("id", "alpha_id", "alphaId", "alpha")
 SELF_KIND = "self"
 PROD_KIND = "prod"

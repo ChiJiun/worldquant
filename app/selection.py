@@ -10,6 +10,7 @@ import json
 import re
 
 from app.correlations import (
+    SELF_CORRELATION_THRESHOLD,
     has_self_correlation,
     load_correlation_cache,
     oldest_fetched_at,
@@ -52,8 +53,8 @@ BEST_FIELDS = REGISTRY_FIELDS + ["cluster_id"]
 QUEUE_FIELDS = BEST_FIELDS + ["submit_score"]
 # Structural (expression fingerprint) similarity is only a proxy, so it needs a high bar.
 CORRELATION_THRESHOLD = 0.85
-# BRAIN's SELF_CORRELATION submission check fails above 0.7, so platform numbers use that bar.
-PLATFORM_CORRELATION_THRESHOLD = 0.7
+# BRAIN's SELF_CORRELATION submission check fails at 0.7, so platform numbers use that bar.
+PLATFORM_CORRELATION_THRESHOLD = SELF_CORRELATION_THRESHOLD
 PLATFORM_REASON = "platform_self_corr"
 
 KNOWN_FIELDS = [

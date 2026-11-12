@@ -258,3 +258,163 @@ def test_record_passed_alpha_rejects_non_finite_metrics_and_bad_timestamp(tmp_pa
 
     written = record_passed_alpha(research_dir, {**base, "recorded_at": "2026-05-21T08:09:57Z"})
     assert written["recorded_at"] == "2026-05-21T08:09:57Z"
+
+
+def test_research_decision_records_parent_attribution_from_nested_metadata(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A1",
+                "family": "f",
+                "expression": "rank(close)",
+                "result_id": "alpha-1",
+                "metrics": {"fitness": 0.6, "sharpe": 0.9, "turnover": 0.35, "drawdown": 0.14, "raw": {"is": {"checks": []}}},
+            }
+        ],
+        [],
+    )
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A2",
+                "family": "f",
+                "expression": "ts_decay_linear(rank(close), 60)",
+                "result_id": "alpha-2",
+                "metadata": {"metadata": {"parent_candidate_id": "A1", "changed_dimension": "decay_20_to_60"}},
+                "metrics": {"fitness": 0.96, "sharpe": 1.04, "turnover": 0.4, "drawdown": 0.16, "raw": {"is": {"checks": []}}},
+            }
+        ],
+        [],
+    )
+
+    latest = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
+    assert latest["parent_candidate_id"] == "A1"
+    assert latest["changed_dimension"] == "decay_20_to_60"
+    assert latest["latest_vs_parent"]["improved"] == ["sharpe", "fitness"]
+    assert latest["latest_vs_parent"]["worsened"] == ["turnover", "drawdown"]
+    assert latest["latest_vs_parent"]["verdict"] == "improvement_with_trade_off"
+    assert latest["latest_vs_parent"]["reference_candidate_id"] == "A1"
+
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
+    snapshot = memory["families"]["f"]["recent_candidates"][-1]
+    assert snapshot["metadata"] == {"parent_candidate_id": "A1", "changed_dimension": "decay_20_to_60"}
+    assert memory["families"]["f"]["lessons"][-1]["changed_dimension"] == "decay_20_to_60"
+
+
+def test_research_decision_marks_missing_parent(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A2",
+                "family": "f",
+                "expression": "rank(close)",
+                "result_id": "alpha-2",
+                "metadata": {"parent_candidate_id": "GHOST", "changed_dimension": "x"},
+                "metrics": {"fitness": 0.9},
+            },
+            {
+                "candidate_id": "A3",
+                "family": "f",
+                "expression": "rank(open)",
+                "result_id": "alpha-3",
+                "metrics": {"fitness": 0.9},
+            },
+        ],
+        [],
+    )
+
+    rows = [json.loads(line) for line in paths.experiment_decisions.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["latest_vs_parent"] == {"status": "parent_not_found"}
+    assert rows[1]["latest_vs_parent"] == {"status": "no_parent_recorded"}
+
+
+def test_update_candidate_metrics_touches_every_snapshot():
+    from app.research import update_candidate_metrics
+
+    snap = {"candidate_id": "A1", "result_id": "alpha-1", "metrics": {"fitness": 0.5}}
+    memory = {
+        "families": {
+            "f": {"best_candidate": dict(snap), "recent_candidates": [dict(snap), {"candidate_id": "A2", "metrics": {}}]},
+        },
+        "global_best": dict(snap),
+    }
+
+    updated = update_candidate_metrics(memory, "A1", {"fitness": 1.5}, result_id="alpha-1")
+
+    assert updated == 3
+    assert memory["families"]["f"]["best_candidate"]["metrics"] == {"fitness": 1.5}
+    assert memory["families"]["f"]["recent_candidates"][0]["refreshed_at"].endswith("Z")
+    assert memory["families"]["f"]["recent_candidates"][1]["metrics"] == {}
+    assert memory["global_best"]["metrics"] == {"fitness": 1.5}
+    # every snapshot owns its metrics dict; mutating one must not leak into the others
+    memory["global_best"]["metrics"]["fitness"] = 9.9
+    assert memory["families"]["f"]["best_candidate"]["metrics"] == {"fitness": 1.5}
+
+
+def test_update_candidate_metrics_skips_snapshots_with_a_different_result_id():
+    """The same candidate_id has been reused across families for different alphas; only the fetched alpha may change."""
+    from app.research import update_candidate_metrics
+
+    reused = {"candidate_id": "OP_EFF_001", "result_id": "alpha-other", "metrics": {"fitness": 0.4, "alpha_id": "alpha-other"}}
+    target = {"candidate_id": "OP_EFF_001", "result_id": "alpha-1", "metrics": {"fitness": 0.5, "alpha_id": "alpha-1"}}
+    memory = {
+        "families": {
+            "a": {"best_candidate": dict(target), "recent_candidates": [dict(target)]},
+            "b": {"best_candidate": dict(reused), "recent_candidates": [dict(reused)]},
+        },
+        "global_best": dict(reused),
+    }
+
+    updated = update_candidate_metrics(memory, "OP_EFF_001", {"fitness": 1.5, "alpha_id": "alpha-1"}, result_id="alpha-1")
+
+    assert updated == 2
+    assert memory["families"]["a"]["best_candidate"]["metrics"]["fitness"] == 1.5
+    assert memory["families"]["b"]["best_candidate"]["metrics"] == {"fitness": 0.4, "alpha_id": "alpha-other"}
+    assert memory["families"]["b"]["recent_candidates"][0]["metrics"]["alpha_id"] == "alpha-other"
+    assert memory["global_best"]["metrics"]["fitness"] == 0.4
+    assert "refreshed_at" not in memory["global_best"]
+
+
+def test_recorder_attributes_parent_that_only_exists_in_passed_alphas_csv(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    paths.passed_alphas.parent.mkdir(parents=True, exist_ok=True)
+    paths.passed_alphas.write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision",
+                "2026-05-22T02:31:02Z,P_MANUAL,f,rank(close),alpha-p,2.24,2.51,0.1567,0.0549,0.0486,validate_best_candidate",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "C1",
+                "family": "f",
+                "expression": "rank(open)",
+                "result_id": "alpha-c",
+                "metadata": {"parent_candidate_id": "P_MANUAL", "changed_dimension": "field_close_to_open"},
+                "metrics": {"fitness": 2.7, "sharpe": 2.3, "turnover": 0.04, "returns": 0.16, "drawdown": 0.05},
+            }
+        ],
+        [],
+    )
+
+    latest = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
+    assert latest["latest_vs_parent"]["reference_candidate_id"] == "P_MANUAL"
+    assert latest["latest_vs_parent"]["reference_source"] == str(paths.passed_alphas)
+    assert latest["latest_vs_parent"]["verdict"] == "net_improvement"
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
+    assert memory["families"]["f"]["lessons"][-1]["parent_candidate_id"] == "P_MANUAL"

@@ -50,7 +50,8 @@ Python 程式。現在只保留：
 - `api/clients.py`: WorldQuant login / simulate / poll / result client。
 - `simulator.py`: 讀候選、跑 simulate、寫 JSONL artifacts。
 - `research.py`: 更新 family memory、passed/failed logs、decision log。
-- `validation.py`: 從 research memory 產生 validation report。
+- `validation.py`: 從 research memory 產生 validation report；`--refresh` 會重抓 BRAIN 結果與 self-correlation。
+- `attribution.py`: parent-vs-child / family best / global best 的指標歸因。
 - `selection.py`: 對 passed alphas 做 fingerprint、相關性 clustering、submit queue。
 - `correlations.py`: 解析 BRAIN self/prod correlation 回應、維護 `research/state/alpha_correlations.json` 快取。
 - `research_paths.py`: 集中定義 `research/` 新 layout，並保留舊路徑 fallback。
@@ -320,6 +321,26 @@ LLM researcher 可以把 simulation setting 當成實驗維度，但一輪只能
 C:\Users\USER\anaconda3\python.exe -m app result <alpha_or_result_id>
 ```
 
+看一條 candidate 相對父代、family best、global best 的指標變化（預設看 global best）：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app attribute
+C:\Users\USER\anaconda3\python.exe -m app attribute --candidate-id ANALYST_REV_001
+```
+
+輸出包含 `vs_parent` / `vs_family_best` / `vs_global_best` 每個指標的 from/to/delta、`improved` / `worsened` 清單、整體 `verdict`（`net_improvement`、`improvement_with_trade_off`、`trade_off`、`regression_with_trade_off`、`regression`、`unchanged`）與下一步提示。父代由 candidate 的 `parent_candidate_id` 決定，依序從 family memory、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv` 找（手動用 `record-passed-alpha` 補登的父代只在 CSV）；同一份歸因也會在每次 simulate 後自動寫進 `research/logs/experiment_decisions.jsonl` 每筆成功結果的 `latest_vs_parent`（simulate 失敗的 error row 沒有指標可比，不帶這個欄位）。沒寫 `parent_candidate_id` 的 candidate 會得到 `no_parent_recorded`。
+
+驗證 candidate（預設 global best），並在平台 SELF_CORRELATION 還是 PENDING 時改用 `fetch-correlations` 的快取：
+
+```powershell
+C:\Users\USER\anaconda3\python.exe -m app validate-candidate
+C:\Users\USER\anaconda3\python.exe -m app validate-candidate --candidate-id ANALYST_REV_001 --refresh --write-artifact
+```
+
+`--refresh` 會用 candidate 的 `result_id` 重新從 BRAIN 抓 alpha（PENDING 的 checks 通常會變成結果）、更新 `family_memory.json` 裡**同一個 `result_id`** 的所有快照（同名 candidate 但指向別的 alpha 的快照不會被動到），並順便把它的 self-correlation 寫進 `research/state/alpha_correlations.json`。需要 live client；`WQ_DRY_RUN=true` 下會直接報錯。
+
+同一個 `candidate_id` 曾在不同 family 重用時，報告會多一個 `warning` 說明選到哪個 `result_id`；用 `--result-id <alpha id>` 可以明確指定要驗證哪一條。找不到 candidate 或 memory 檔不存在時會印出錯誤訊息並以 exit code 1 結束，不會噴 traceback。改用快取判定的 self_corr check 會帶 `fetched_at`，太舊就先 `fetch-correlations --refresh`。
+
 手動補登一條已驗證的 passed alpha（取代以前散落在根目錄的 append_*.py 腳本）：
 
 ```powershell
@@ -443,11 +464,15 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 
 ## 下一步
 
+已完成：
+
+- parent-vs-child metric attribution（`python -m app attribute`，並自動寫入 `experiment_decisions.jsonl`）
+- validation check runner（`python -m app validate-candidate --refresh`，含 self-correlation 快取）
+- BRAIN 真實相關性（`python -m app fetch-correlations`）
+
 接下來可以加：
 
-- parent-vs-child metric attribution
-- validation check runner
-- operator-aware alpha designer
+- operator-aware alpha designer（送 simulate 前依 `config/fields.json` 驗證 field/operator）
 - template governor
 
 研究員 layer 的設計規格先放在：

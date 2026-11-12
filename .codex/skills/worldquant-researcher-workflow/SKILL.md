@@ -176,6 +176,8 @@ Supported per-run setting dimensions:
 If a setting is overridden, include it in `changed_dimension` and `notes` in `data/candidates.jsonl`.
 
 6. Read new artifacts from `outputs/current_run/` and `research/`.
+   Run `python -m app attribute --candidate-id <id>` to get the child-vs-parent metric deltas and verdict instead of eyeballing them; the same block is stored as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`.
+   When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding.
 
 7. Reflect with the taxonomy in `references/research-policy.md`.
    Decide exactly one next action:

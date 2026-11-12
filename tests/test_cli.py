@@ -205,3 +205,62 @@ def test_fetch_correlations_cli_requires_alpha_ids(settings, monkeypatch, capsys
 
     assert exc_info.value.code == 2
     assert "no alpha ids" in capsys.readouterr().err
+
+
+def test_attribute_cli_prints_parent_comparison(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    state_dir = Path("research") / "state"
+    state_dir.mkdir(parents=True)
+    parent = {"candidate_id": "P1", "family": "f", "expression": "rank(close)", "result_id": "a-p", "metrics": {"fitness": 1.0, "sharpe": 1.2, "turnover": 0.3}}
+    child = {
+        "candidate_id": "C1",
+        "family": "f",
+        "expression": "rank(open)",
+        "result_id": "a-c",
+        "metrics": {"fitness": 1.4, "sharpe": 1.3, "turnover": 0.5},
+        "metadata": {"parent_candidate_id": "P1", "changed_dimension": "field_close_to_open"},
+    }
+    (state_dir / "family_memory.json").write_text(
+        json.dumps({"families": {"f": {"best_candidate": child, "recent_candidates": [parent, child]}}, "global_best": child}),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["attribute", "--candidate-id", "C1"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["candidate_id"] == "C1"
+    assert payload["vs_parent"]["verdict"] == "improvement_with_trade_off"
+    assert payload["vs_global_best"] == {"status": "is_global_best"}
+
+    exit_code = main(["attribute"])
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["candidate_id"] == "C1"
+
+    exit_code = main(["attribute", "--candidate-id", "NOPE"])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert "NOPE" in captured.err
+
+
+def test_validate_candidate_cli_reports_missing_memory_without_traceback(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    exit_code = main(["validate-candidate", "--candidate-id", "A1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "family_memory.json is missing or empty" in captured.err
+
+
+def test_validate_candidate_cli_refuses_refresh_in_dry_run(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["validate-candidate", "--refresh"])
+
+    assert exc_info.value.code == 2
+    assert "needs a live BRAIN client" in capsys.readouterr().err
