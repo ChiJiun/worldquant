@@ -242,7 +242,7 @@ def _hint(verdict_label: str, changed_dimension: str) -> str:
     return {
         "net_improvement": f"Keep {dim}; continue one-dimensional tuning from this candidate.",
         "improvement_with_trade_off": f"{dim} improved the core metrics but cost something else; keep it only if the worsened metric is not the family's dominant bottleneck.",
-        "trade_off": f"{dim} only moved metrics around; revert to the parent unless the worsened metric is irrelevant to the bottleneck.",
+        "trade_off": f"{dim} improved one core metric and worsened the other; judge it by the family's dominant bottleneck (fitness already prices turnover and returns) instead of reverting by default.",
         "regression_with_trade_off": f"{dim} hurt the core metrics; revert to the parent and try a different dimension.",
         "regression": f"Revert {dim}; every available metric got worse.",
         "unchanged": f"{dim} had no measurable effect; drop it and test a different dimension.",

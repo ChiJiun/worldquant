@@ -266,3 +266,71 @@ def test_validate_candidate_refresh_requires_client_and_result_id(tmp_path):
 
     with pytest.raises(ValueError, match="no result_id"):
         validate_candidate_from_memory(research_dir2, refresh=True, client=MockBrainClient(RateLimiter(0.0)))
+
+
+def test_validate_candidate_refresh_leaves_other_alpha_with_same_candidate_id_alone(tmp_path):
+    from app.api import MockBrainClient, RateLimiter
+    from app.models import SimulationMetrics
+
+    research_dir = tmp_path / "research"
+    candidate = _memory_with_pending_self_corr(research_dir)
+    memory_path = research_dir / "state" / "family_memory.json"
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    other = dict(candidate, family="g", expression="rank(volume)", result_id="alpha-9", metrics={"fitness": 0.4, "raw": {}})
+    memory["families"]["g"] = {"best_candidate": other, "recent_candidates": [other]}
+    memory_path.write_text(json.dumps(memory), encoding="utf-8")
+    client = MockBrainClient(RateLimiter(0.0))
+    client.results["alpha-1"] = SimulationMetrics(alpha_id="alpha-1", fitness=1.6, raw={"is": {"checks": []}})
+
+    report = validate_candidate_from_memory(research_dir, "A1", refresh=True, client=client)
+
+    assert report["refreshed"]["result_id"] == "alpha-1"
+    assert report["refreshed"]["updated_snapshots"] == 3
+    assert "appears in families ['f', 'g']" in report["warning"]
+    saved = json.loads(memory_path.read_text(encoding="utf-8"))
+    assert saved["families"]["g"]["best_candidate"]["metrics"] == {"fitness": 0.4, "raw": {}}
+    assert saved["families"]["g"]["recent_candidates"][0]["result_id"] == "alpha-9"
+    assert saved["families"]["f"]["best_candidate"]["metrics"]["fitness"] == 1.6
+
+
+def test_validate_candidate_result_id_picks_the_reused_candidate_id(tmp_path):
+    research_dir = tmp_path / "research"
+    candidate = _memory_with_pending_self_corr(research_dir)
+    memory_path = research_dir / "state" / "family_memory.json"
+    memory = json.loads(memory_path.read_text(encoding="utf-8"))
+    other = dict(candidate, family="g", expression="rank(volume)", result_id="alpha-9", metrics={"fitness": 0.4, "raw": {}})
+    memory["families"]["g"] = {"best_candidate": other, "recent_candidates": [other]}
+    memory_path.write_text(json.dumps(memory), encoding="utf-8")
+
+    report = validate_candidate_from_memory(research_dir, "A1", result_id="alpha-9")
+
+    assert report["result_id"] == "alpha-9"
+    assert report["expression"] == "rank(volume)"
+    assert "warning" not in report
+
+    import pytest
+
+    with pytest.raises(ValueError, match="result_id=alpha-404"):
+        validate_candidate_from_memory(research_dir, "A1", result_id="alpha-404")
+
+
+def test_validate_candidate_reports_missing_memory_clearly(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="missing or empty"):
+        validate_candidate_from_memory(tmp_path / "research")
+
+
+def test_validate_candidate_cached_self_corr_reports_fetched_at(tmp_path):
+    research_dir = tmp_path / "research"
+    _memory_with_pending_self_corr(research_dir)
+    (research_dir / "state" / "alpha_correlations.json").write_text(
+        json.dumps({"version": 1, "alphas": {"alpha-1": {"self": {"max_correlation": 0.2, "records": [], "fetched_at": "2026-05-01T00:00:00Z"}}}}),
+        encoding="utf-8",
+    )
+
+    report = validate_candidate_from_memory(research_dir)
+
+    assert report["checks"]["self_corr"]["status"] == "pass"
+    assert report["checks"]["self_corr"]["fetched_at"] == "2026-05-01T00:00:00Z"
+    assert "fetched_at=2026-05-01T00:00:00Z" in report["checks"]["self_corr"]["reason"]

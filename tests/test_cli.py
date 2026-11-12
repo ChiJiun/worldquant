@@ -237,6 +237,24 @@ def test_attribute_cli_prints_parent_comparison(settings, monkeypatch, capsys):
     assert exit_code == 0
     assert json.loads(capsys.readouterr().out)["candidate_id"] == "C1"
 
+    exit_code = main(["attribute", "--candidate-id", "NOPE"])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert "NOPE" in captured.err
+
+
+def test_validate_candidate_cli_reports_missing_memory_without_traceback(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    exit_code = main(["validate-candidate", "--candidate-id", "A1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "family_memory.json is missing or empty" in captured.err
+
 
 def test_validate_candidate_cli_refuses_refresh_in_dry_run(settings, monkeypatch, capsys):
     monkeypatch.chdir(settings.candidate_file.parent.parent)

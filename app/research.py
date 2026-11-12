@@ -4,13 +4,14 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+import copy
 import csv
 import json
 import math
 
 from app.attribution import candidate_metadata, compare_metrics, find_candidate
 from app.models import utc_now_iso
-from app.research_paths import ensure_research_layout, existing_or_new, research_paths
+from app.research_paths import ResearchPaths, ensure_research_layout, existing_or_new, research_paths
 
 FAILURE_TAXONOMY = [
     "turnover_too_high",
@@ -85,8 +86,8 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
     failed_rows: List[Dict[str, Any]] = []
 
     for result in result_rows:
-        decision = _decision_from_result(result, memory)
-        _update_memory(memory, result, decision)
+        decision = _decision_from_result(result, memory, paths)
+        _update_memory(memory, result, decision, paths)
         decision["workflow_loop"] = memory["families"].get(str(result.get("family") or "manual"), {}).get("workflow_loop")
         decisions.append(decision)
         flat = _flat_result_row(result, decision)
@@ -197,17 +198,31 @@ def save_family_memory(research_dir: Path, memory: Dict[str, Any]) -> Path:
     return paths.family_memory
 
 
-def update_candidate_metrics(memory: Dict[str, Any], candidate_id: str, metrics: Dict[str, Any]) -> int:
-    """Replace the stored metrics of every snapshot of ``candidate_id`` (recent, family best, global best)."""
+def update_candidate_metrics(
+    memory: Dict[str, Any],
+    candidate_id: str,
+    metrics: Dict[str, Any],
+    result_id: Optional[str] = None,
+) -> int:
+    """Replace the stored metrics of every snapshot of ``candidate_id`` (recent, family best, global best).
+
+    ``candidate_id`` alone is not a safe key: the same id has been reused across families for different
+    expressions, so when ``result_id`` (the BRAIN alpha id the metrics came from) is given only snapshots
+    carrying that exact ``result_id`` are touched. Each snapshot gets its own copy of ``metrics``.
+    """
     refreshed_at = utc_now_iso()
     updated = 0
+    wanted_result = str(result_id or "").strip()
 
     def _apply(snapshot: Any) -> None:
         nonlocal updated
-        if isinstance(snapshot, dict) and snapshot.get("candidate_id") == candidate_id:
-            snapshot["metrics"] = metrics
-            snapshot["refreshed_at"] = refreshed_at
-            updated += 1
+        if not isinstance(snapshot, dict) or snapshot.get("candidate_id") != candidate_id:
+            return
+        if wanted_result and str(snapshot.get("result_id") or "").strip() != wanted_result:
+            return
+        snapshot["metrics"] = copy.deepcopy(metrics)
+        snapshot["refreshed_at"] = refreshed_at
+        updated += 1
 
     families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
     for family in families.values():
@@ -235,7 +250,16 @@ def _load_memory(path: Path) -> Dict[str, Any]:
     return payload
 
 
-def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dict[str, Any]:
+def _find_parent(memory: Dict[str, Any], parent_id: str, paths: Optional[ResearchPaths] = None) -> Optional[Dict[str, Any]]:
+    """Parent lookup shared by the recorder and ``python -m app attribute``: memory, decisions log, then CSVs."""
+    if not parent_id:
+        return None
+    if paths is None:
+        return find_candidate(memory, parent_id)
+    return find_candidate(memory, parent_id, paths.experiment_decisions, (paths.passed_alphas, paths.failed_alphas))
+
+
+def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any], paths: Optional[ResearchPaths] = None) -> Dict[str, Any]:
     metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
     family = str(result.get("family") or "manual")
     current_fitness = _float(metrics.get("fitness"))
@@ -256,10 +280,12 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
             worsened.append("fitness")
     metadata = candidate_metadata(result)
     parent_id = str(metadata.get("parent_candidate_id") or "").strip()
-    parent = find_candidate(memory, parent_id) if parent_id else None
+    parent = _find_parent(memory, parent_id, paths)
     if parent is not None:
         latest_vs_parent = compare_metrics(result, parent)
         latest_vs_parent["reference_candidate_id"] = parent.get("candidate_id")
+        if parent.get("source"):
+            latest_vs_parent["reference_source"] = parent.get("source")
     else:
         latest_vs_parent = {"status": "parent_not_found" if parent_id else "no_parent_recorded"}
 
@@ -329,7 +355,12 @@ def _decision_from_error(error: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _update_memory(memory: Dict[str, Any], result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+def _update_memory(
+    memory: Dict[str, Any],
+    result: Dict[str, Any],
+    decision: Dict[str, Any],
+    paths: Optional[ResearchPaths] = None,
+) -> None:
     family_name = str(result.get("family") or "manual")
     family = memory["families"].setdefault(
         family_name,
@@ -355,7 +386,7 @@ def _update_memory(memory: Dict[str, Any], result: Dict[str, Any], decision: Dic
     family["status"] = _family_status(decision, family)
     candidate_snapshot = _candidate_snapshot(result, decision)
     family["recent_candidates"] = (family.get("recent_candidates", []) + [candidate_snapshot])[-20:]
-    lesson = _derive_lesson(result, decision, family.get("recent_candidates", []), memory)
+    lesson = _derive_lesson(result, decision, family.get("recent_candidates", []), memory, paths)
     if lesson:
         family["lessons"] = _append_unique_lesson(family.get("lessons", []), lesson)
         memory["lessons"] = _append_unique_lesson(memory.get("lessons", []), lesson)
@@ -520,6 +551,7 @@ def _derive_lesson(
     decision: Dict[str, Any],
     recent_candidates: List[Dict[str, Any]],
     memory: Optional[Dict[str, Any]] = None,
+    paths: Optional[ResearchPaths] = None,
 ) -> Optional[Dict[str, Any]]:
     metadata = candidate_metadata(result)
     changed_dimension = str(metadata.get("changed_dimension") or "").strip()
@@ -528,7 +560,7 @@ def _derive_lesson(
         return None
     parent = _find_recent_candidate(recent_candidates, parent_id)
     if not parent and memory is not None:
-        parent = find_candidate(memory, parent_id)
+        parent = _find_parent(memory, parent_id, paths)
     if not parent:
         return None
     current_metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}

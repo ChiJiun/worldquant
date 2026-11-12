@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -56,6 +57,11 @@ def make_parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate-candidate", help="Print deterministic validation report from research memory")
     validate.add_argument("--candidate-id", default=None, help="Candidate id to validate. Defaults to global best")
+    validate.add_argument(
+        "--result-id",
+        default=None,
+        help="BRAIN alpha id to pick when the same candidate id was reused across families",
+    )
     validate.add_argument("--write-artifact", action="store_true", help="Append validation_reports files. Default prints only")
     validate.add_argument(
         "--refresh",
@@ -256,24 +262,33 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "validate-candidate":
         if args.refresh and (settings.dry_run or settings.client_mode.lower() == "mock"):
             parser.error("--refresh needs a live BRAIN client; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests")
-        report = validate_candidate_from_memory(
-            settings.research_dir,
-            args.candidate_id,
-            persist=args.write_artifact,
-            refresh=args.refresh,
-            client=client if args.refresh else None,
-        )
+        try:
+            report = validate_candidate_from_memory(
+                settings.research_dir,
+                args.candidate_id,
+                result_id=args.result_id,
+                persist=args.write_artifact,
+                refresh=args.refresh,
+                client=client if args.refresh else None,
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print(render_metrics_payload(report))
         return 0
 
     if args.command == "attribute":
         paths = research_paths(settings.research_dir)
-        report = build_attribution(
-            load_family_memory(settings.research_dir),
-            args.candidate_id,
-            decisions_path=paths.experiment_decisions,
-            csv_paths=(paths.passed_alphas, paths.failed_alphas),
-        )
+        try:
+            report = build_attribution(
+                load_family_memory(settings.research_dir),
+                args.candidate_id,
+                decisions_path=paths.experiment_decisions,
+                csv_paths=(paths.passed_alphas, paths.failed_alphas),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         print(render_metrics_payload(report))
         return 0
 

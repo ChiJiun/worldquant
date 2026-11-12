@@ -9,6 +9,7 @@ from app.correlations import (
     SELF_CORRELATION_THRESHOLD,
     load_correlation_cache,
     save_correlation_cache,
+    self_correlation_fetched_at,
     self_correlation_max,
     update_correlation_cache,
 )
@@ -40,21 +41,31 @@ def validate_candidate_from_memory(
     research_dir: Path,
     candidate_id: Optional[str] = None,
     *,
+    result_id: Optional[str] = None,
     persist: bool = False,
     refresh: bool = False,
     client: Any = None,
 ) -> Dict[str, Any]:
     """Build the validation report for a candidate stored in family memory.
 
+    ``result_id`` disambiguates a ``candidate_id`` that was reused across families for different alphas.
     With ``refresh`` the alpha is re-fetched from BRAIN through ``client`` (so PENDING platform checks can
-    resolve), every stored snapshot of the candidate gets the new metrics, and its self-correlation is
+    resolve), every stored snapshot of that exact alpha gets the new metrics, and its self-correlation is
     pulled into ``research/state/alpha_correlations.json``.
     """
     paths = ensure_research_layout(research_dir)
     memory = load_family_memory(research_dir)
-    candidate = _select_candidate(memory, candidate_id)
+    if not memory.get("families") and not memory.get("global_best"):
+        raise ValueError(
+            f"family_memory.json is missing or empty under {research_dir}; run `python -m app simulate` first"
+        )
+    candidate = _select_candidate(memory, candidate_id, result_id)
     if candidate is None:
-        raise ValueError(f"Candidate not found in family_memory.json: {candidate_id or '<global_best>'}")
+        wanted = candidate_id or "<global_best>"
+        if result_id:
+            wanted += f" (result_id={result_id})"
+        raise ValueError(f"Candidate not found in family_memory.json: {wanted}")
+    duplicate_families = _families_with_candidate(memory, str(candidate.get("candidate_id") or ""))
 
     refreshed: Optional[Dict[str, Any]] = None
     if refresh:
@@ -64,6 +75,11 @@ def validate_candidate_from_memory(
     report = _build_report(candidate, cache)
     if refreshed is not None:
         report["refreshed"] = refreshed
+    if len(duplicate_families) > 1 and not result_id:
+        report["warning"] = (
+            f"candidate_id {candidate.get('candidate_id')} appears in families {duplicate_families}; "
+            f"using result_id {candidate.get('result_id')} (pass --result-id to pick another alpha)"
+        )
     if persist:
         _append_jsonl(paths.validation_reports_jsonl, [report])
         _append_csv(paths.validation_reports_csv, [_flat_report(report)])
@@ -84,7 +100,7 @@ def _refresh_candidate(
         raise ValueError(f"Candidate {candidate.get('candidate_id')} has no result_id to refresh from BRAIN")
     metrics = client.fetch_result(result_id).as_dict()
     candidate_id = str(candidate.get("candidate_id") or "")
-    updated = update_candidate_metrics(memory, candidate_id, metrics)
+    updated = update_candidate_metrics(memory, candidate_id, metrics, result_id=result_id)
     save_family_memory(research_dir, memory)
     refreshed: Dict[str, Any] = {
         "result_id": result_id,
@@ -163,13 +179,15 @@ def _self_corr_from_cache(cache: Dict[str, Dict[str, Any]], result_id: str) -> O
     if platform_max is None:
         return None
     status = "fail" if platform_max >= SELF_CORRELATION_THRESHOLD else "pass"
+    fetched_at = self_correlation_fetched_at(cache, result_id)
     return {
         "status": status,
         "reason": (
             f"BRAIN self-correlation max={platform_max:g} vs threshold {SELF_CORRELATION_THRESHOLD:g} "
-            "(from research/state/alpha_correlations.json)"
+            f"(from research/state/alpha_correlations.json, fetched_at={fetched_at or 'unknown'})"
         ),
         "source": "correlation_cache",
+        "fetched_at": fetched_at,
     }
 
 
@@ -208,7 +226,18 @@ def _check_from_platform(platform_checks: List[Dict[str, Any]], name_parts: List
     return {"status": "pass", "reason": json.dumps(matched, ensure_ascii=False)}
 
 
-def _select_candidate(memory: Dict[str, Any], candidate_id: Optional[str]) -> Optional[Dict[str, Any]]:
+def _select_candidate(
+    memory: Dict[str, Any],
+    candidate_id: Optional[str],
+    result_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    wanted_result = str(result_id or "").strip()
+
+    def _matches(candidate: Any) -> bool:
+        if not isinstance(candidate, dict) or candidate.get("candidate_id") != candidate_id:
+            return False
+        return not wanted_result or str(candidate.get("result_id") or "").strip() == wanted_result
+
     if not candidate_id:
         best = memory.get("global_best")
         return best if isinstance(best, dict) else None
@@ -219,15 +248,30 @@ def _select_candidate(memory: Dict[str, Any], candidate_id: Optional[str]) -> Op
                 if isinstance(candidate, dict)
             ]
             for candidate in reversed(recent_candidates):
-                if candidate.get("candidate_id") == candidate_id and not _is_mock_candidate(candidate):
+                if _matches(candidate) and not _is_mock_candidate(candidate):
                     return candidate
             for candidate in reversed(recent_candidates):
-                if candidate.get("candidate_id") == candidate_id:
+                if _matches(candidate):
                     return candidate
             best = family.get("best_candidate")
-            if isinstance(best, dict) and best.get("candidate_id") == candidate_id:
+            if _matches(best):
                 return best
     return None
+
+
+def _families_with_candidate(memory: Dict[str, Any], candidate_id: str) -> List[str]:
+    """Family names whose snapshots carry ``candidate_id``; more than one means the id was reused."""
+    if not candidate_id:
+        return []
+    names: List[str] = []
+    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
+    for name, family in sorted(families.items()):
+        if not isinstance(family, dict):
+            continue
+        snapshots = [family.get("best_candidate")] + list(family.get("recent_candidates", []) or [])
+        if any(isinstance(item, dict) and item.get("candidate_id") == candidate_id for item in snapshots):
+            names.append(str(name))
+    return names
 
 
 def _is_mock_candidate(candidate: Dict[str, Any]) -> bool:
