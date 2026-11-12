@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import csv
 import json
 
+from app.attribution import families_with_candidate, snapshot_matches
 from app.correlations import (
     SELF_CORRELATION_THRESHOLD,
     load_correlation_cache,
@@ -48,7 +49,8 @@ def validate_candidate_from_memory(
 ) -> Dict[str, Any]:
     """Build the validation report for a candidate stored in family memory.
 
-    ``result_id`` disambiguates a ``candidate_id`` that was reused across families for different alphas.
+    ``result_id`` disambiguates a ``candidate_id`` that was reused across families for different alphas;
+    on its own it selects the snapshot carrying that BRAIN alpha id whatever its ``candidate_id``.
     With ``refresh`` the alpha is re-fetched from BRAIN through ``client`` (so PENDING platform checks can
     resolve), every stored snapshot of that exact alpha gets the new metrics, and its self-correlation is
     pulled into ``research/state/alpha_correlations.json``.
@@ -61,11 +63,11 @@ def validate_candidate_from_memory(
         )
     candidate = _select_candidate(memory, candidate_id, result_id)
     if candidate is None:
-        wanted = candidate_id or "<global_best>"
+        wanted = candidate_id or ("<any candidate>" if result_id else "<global_best>")
         if result_id:
             wanted += f" (result_id={result_id})"
         raise ValueError(f"Candidate not found in family_memory.json: {wanted}")
-    duplicate_families = _families_with_candidate(memory, str(candidate.get("candidate_id") or ""))
+    duplicate_families = families_with_candidate(memory, str(candidate.get("candidate_id") or ""))
 
     refreshed: Optional[Dict[str, Any]] = None
     if refresh:
@@ -231,17 +233,23 @@ def _select_candidate(
     candidate_id: Optional[str],
     result_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    """Pick the snapshot to validate.
+
+    Neither id given: the global best. ``candidate_id`` given: its latest snapshot (a live one is
+    preferred over a mock one), optionally narrowed to ``result_id``. Only ``result_id`` given: the
+    snapshot carrying that BRAIN alpha id, searched across every family, so the flag is never silently
+    ignored.
+    """
     wanted_result = str(result_id or "").strip()
-
-    def _matches(candidate: Any) -> bool:
-        if not isinstance(candidate, dict) or candidate.get("candidate_id") != candidate_id:
-            return False
-        return not wanted_result or str(candidate.get("result_id") or "").strip() == wanted_result
-
-    if not candidate_id:
+    if not candidate_id and not wanted_result:
         best = memory.get("global_best")
         return best if isinstance(best, dict) else None
-    for family in memory.get("families", {}).values():
+
+    def _matches(candidate: Any) -> bool:
+        return snapshot_matches(candidate, candidate_id, wanted_result)
+
+    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
+    for family in families.values():
         if isinstance(family, dict):
             recent_candidates = [
                 candidate for candidate in family.get("recent_candidates", [])
@@ -256,22 +264,10 @@ def _select_candidate(
             best = family.get("best_candidate")
             if _matches(best):
                 return best
+    global_best = memory.get("global_best")
+    if _matches(global_best):
+        return global_best
     return None
-
-
-def _families_with_candidate(memory: Dict[str, Any], candidate_id: str) -> List[str]:
-    """Family names whose snapshots carry ``candidate_id``; more than one means the id was reused."""
-    if not candidate_id:
-        return []
-    names: List[str] = []
-    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
-    for name, family in sorted(families.items()):
-        if not isinstance(family, dict):
-            continue
-        snapshots = [family.get("best_candidate")] + list(family.get("recent_candidates", []) or [])
-        if any(isinstance(item, dict) and item.get("candidate_id") == candidate_id for item in snapshots):
-            names.append(str(name))
-    return names
 
 
 def _is_mock_candidate(candidate: Dict[str, Any]) -> bool:

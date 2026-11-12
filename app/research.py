@@ -48,9 +48,15 @@ PASSED_FIELDS = [
     "drawdown",
     "turnover",
     "decision",
+    "source",
 ]
 
 FAILED_FIELDS = PASSED_FIELDS + ["dominant_bottleneck", "error_type", "error"]
+
+# ``source`` column of passed/failed_alphas.csv and ``experiment_decisions.jsonl``: where the metrics came from.
+SOURCE_LIVE = "live"
+SOURCE_MOCK = "mock"
+SOURCES = (SOURCE_LIVE, SOURCE_MOCK)
 
 
 def initialize_research_dir(path: Path) -> None:
@@ -72,7 +78,21 @@ def _existing_family_memory_path(research_dir: Path, preferred: Path) -> Path:
     return existing_or_new(preferred, research_dir / "family_memory.json", research_dir / "old" / "family_memory.json")
 
 
-def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, Any]], errors: Iterable[Dict[str, Any]]) -> None:
+def record_research_artifacts(
+    research_dir: Path,
+    results: Iterable[Dict[str, Any]],
+    errors: Iterable[Dict[str, Any]],
+    *,
+    source: Optional[str] = None,
+) -> None:
+    """Append simulate results/errors to the research logs and update family memory.
+
+    ``source`` (``live`` or ``mock``, default ``live``) is written to every decision row and to the
+    ``source`` column of ``passed_alphas.csv`` / ``failed_alphas.csv`` so mock rows can be told apart
+    from real BRAIN results afterwards. A result whose metrics carry the mock marker (``raw.mode=mock``
+    or an ``alpha_id`` starting with ``mock-``) is tagged ``mock`` whatever ``source`` says.
+    """
+    default_source = normalize_source(source)
     initialize_research_dir(research_dir)
     paths = research_paths(research_dir)
     result_rows = list(results)
@@ -87,6 +107,7 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
 
     for result in result_rows:
         decision = _decision_from_result(result, memory, paths)
+        decision["source"] = result_source(result, default_source)
         _update_memory(memory, result, decision, paths)
         decision["workflow_loop"] = memory["families"].get(str(result.get("family") or "manual"), {}).get("workflow_loop")
         decisions.append(decision)
@@ -98,6 +119,7 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
 
     for error in error_rows:
         decision = _decision_from_error(error)
+        decision["source"] = default_source
         decisions.append(decision)
         _update_error_memory(memory, error, decision)
         failed_rows.append(_flat_error_row(error, decision))
@@ -112,6 +134,27 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
 
 PASSED_DECISIONS = {"validate_best_candidate", "promote_candidate"}
 PASSED_METRIC_FIELDS = ("sharpe", "fitness", "returns", "drawdown", "turnover")
+
+
+def normalize_source(value: Any) -> str:
+    """Validate a ``source`` tag; ``None``/empty means ``live``."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return SOURCE_LIVE
+    if text not in SOURCES:
+        raise ValueError(f"source must be one of {list(SOURCES)}, got {value!r}")
+    return text
+
+
+def result_source(result: Dict[str, Any], default: str = SOURCE_LIVE) -> str:
+    """``mock`` when the result's metrics carry the mock marker, else ``default``."""
+    metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
+    return SOURCE_MOCK if _is_mock_metrics(metrics) else default
+
+
+def is_mock_source(value: Any) -> bool:
+    """True for a CSV/decision ``source`` value that marks a mock row (missing/blank = legacy live row)."""
+    return str(value or "").strip().lower() == SOURCE_MOCK
 
 
 def record_passed_alpha(research_dir: Path, row: Dict[str, Any], *, allow_duplicate: bool = False) -> Dict[str, Any]:
@@ -155,6 +198,7 @@ def _normalize_passed_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "expression": expression,
         "result_id": result_id,
         "decision": decision,
+        "source": SOURCE_LIVE,
     }
     for name in PASSED_METRIC_FIELDS:
         raw_value = row.get(name)
@@ -236,14 +280,20 @@ def update_candidate_metrics(
 
 
 def _load_memory(path: Path) -> Dict[str, Any]:
+    """Read family memory; a missing file is an empty memory, an unreadable one is an error.
+
+    Returning an empty dict for a corrupt file used to make callers report "missing or empty" and
+    let the next recorder run overwrite the damaged file; now the caller sees ``ValueError`` naming
+    the file so the user can repair or restore it first.
+    """
     if not path.exists():
         return {"families": {}, "global_best": None, "updated_at": utc_now_iso()}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        payload = {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"family memory file is corrupt (invalid JSON) at {path}: {exc}") from exc
     if not isinstance(payload, dict):
-        payload = {}
+        raise ValueError(f"family memory file is corrupt (expected a JSON object, got {type(payload).__name__}) at {path}")
     payload.setdefault("families", {})
     payload.setdefault("global_best", None)
     payload.setdefault("lessons", [])
@@ -638,6 +688,7 @@ def _flat_result_row(result: Dict[str, Any], decision: Dict[str, Any]) -> Dict[s
         "drawdown": metrics.get("drawdown"),
         "turnover": metrics.get("turnover"),
         "decision": decision["decision"],
+        "source": decision.get("source") or SOURCE_LIVE,
     }
 
 
@@ -654,6 +705,7 @@ def _flat_error_row(error: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str
         "drawdown": "",
         "turnover": "",
         "decision": decision["decision"],
+        "source": decision.get("source") or SOURCE_LIVE,
         "dominant_bottleneck": decision["dominant_bottleneck"],
         "error_type": error.get("error_type"),
         "error": error.get("error"),
@@ -661,15 +713,46 @@ def _flat_error_row(error: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str
 
 
 def _append_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> None:
+    """Append ``rows`` to a CSV whose header is ``fields``.
+
+    A CSV written before a column existed (for example ``source``) is rewritten once with the new
+    header so the appended rows do not overflow the old one; existing rows get an empty value in the
+    new column. A header with columns this code does not know is left alone and appending follows it.
+    """
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    exists = path.exists()
+    header = _csv_header(path)
+    if header is None:
+        fieldnames = fields
+    elif header == fields:
+        fieldnames = fields
+    elif set(header) <= set(fields):
+        _rewrite_csv_with_fields(path, fields)
+        fieldnames = fields
+    else:
+        fieldnames = header
     with path.open("a", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
-        if not exists:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        if header is None:
             writer.writeheader()
         writer.writerows(rows)
+
+
+def _csv_header(path: Path) -> Optional[List[str]]:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return next(csv.reader(handle), None)
+
+
+def _rewrite_csv_with_fields(path: Path, fields: List[str]) -> None:
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        existing = list(csv.DictReader(handle))
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(existing)
 
 
 def _write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
@@ -738,8 +821,11 @@ def _is_mock_candidate(candidate: Any) -> bool:
 
 
 def _is_mock_metrics(metrics: Dict[str, Any]) -> bool:
+    """``MockBrainClient`` marks its metrics with ``raw.mode=mock`` and ``alpha_id=mock-<id>``."""
     raw = metrics.get("raw", {})
-    return isinstance(raw, dict) and raw.get("mode") == "mock"
+    if isinstance(raw, dict) and raw.get("mode") == "mock":
+        return True
+    return str(metrics.get("alpha_id") or "").startswith("mock-")
 
 
 def _checks_failed(metrics: Dict[str, Any]) -> int:

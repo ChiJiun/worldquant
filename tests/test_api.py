@@ -202,7 +202,10 @@ def test_mock_client_returns_preset_or_empty_correlation():
         (5.0, "-3", 5.0),
         (0.0, "30", 30.0),
         (0.0, "abc", 1.0),  # no interval configured and no usable header -> one second, never a hot loop
+        (0.0, "0.2", 1.0),  # the one-second floor also applies to a tiny Retry-After
         (5.0, "600", 60.0),  # capped so a huge Retry-After cannot hang the run
+        (120.0, "30", 120.0),  # a poll interval above the cap still wins: never poll faster than configured
+        (120.0, "600", 120.0),
     ],
 )
 def test_requests_client_retry_delay_respects_platform_and_floor(settings, poll_interval, retry_after, expected):

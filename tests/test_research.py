@@ -1,3 +1,4 @@
+import csv
 import json
 
 import pytest
@@ -210,7 +211,7 @@ def test_record_passed_alpha_appends_normalized_row(tmp_path):
     lines = paths.passed_alphas.read_text(encoding="utf-8").splitlines()
     assert lines[0] == ",".join(PASSED_FIELDS)
     assert len(lines) == 2
-    assert lines[1] == f"{written['recorded_at']},BLUE_001,blue_ocean,rank(close),alpha-1,1.5,1.2,0.1,0.05,0.2,validate_best_candidate"
+    assert lines[1] == f"{written['recorded_at']},BLUE_001,blue_ocean,rank(close),alpha-1,1.5,1.2,0.1,0.05,0.2,validate_best_candidate,live"
 
 
 def test_record_passed_alpha_rejects_duplicate_result_id_unless_allowed(tmp_path):
@@ -418,3 +419,92 @@ def test_recorder_attributes_parent_that_only_exists_in_passed_alphas_csv(tmp_pa
     assert latest["latest_vs_parent"]["verdict"] == "net_improvement"
     memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
     assert memory["families"]["f"]["lessons"][-1]["parent_candidate_id"] == "P_MANUAL"
+
+
+def test_recorder_tags_source_and_upgrades_a_legacy_csv_header(tmp_path):
+    from app.research import FAILED_FIELDS
+
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    paths.passed_alphas.parent.mkdir(parents=True, exist_ok=True)
+    legacy_header = ",".join(PASSED_FIELDS[:-1])
+    assert "source" not in legacy_header
+    paths.passed_alphas.write_text(
+        legacy_header + "\n" + '2026-05-22T02:31:02Z,OLD,f,"rank(close)",alpha-old,2.24,2.51,0.1567,0.0549,0.0486,validate_best_candidate\n',
+        encoding="utf-8",
+    )
+    live = {"candidate_id": "LIVE", "family": "f", "expression": "rank(open)", "result_id": "alpha-live", "metrics": {"fitness": 1.5, "sharpe": 1.4, "turnover": 0.2}}
+    mock = {"candidate_id": "MOCK", "family": "f", "expression": "rank(high)", "result_id": "deadbeef0000", "metrics": {"fitness": 1.6, "sharpe": 1.5, "turnover": 0.2, "alpha_id": "mock-deadbeef0000", "raw": {"mode": "mock"}}}
+    error = {"candidate_id": "ERR", "family": "f", "expression": "bad(close)", "error_type": "RuntimeError", "error": "boom"}
+
+    record_research_artifacts(research_dir, [live], [])
+    record_research_artifacts(research_dir, [mock], [error], source="mock")
+
+    rows = list(csv.DictReader(paths.passed_alphas.open(encoding="utf-8", newline="")))
+    assert list(rows[0].keys()) == PASSED_FIELDS
+    assert [(row["candidate_id"], row["source"]) for row in rows] == [("OLD", ""), ("LIVE", "live"), ("MOCK", "mock")]
+    assert rows[0]["expression"] == "rank(close)"
+    assert rows[0]["fitness"] == "2.51"
+    failed = list(csv.DictReader(paths.failed_alphas.open(encoding="utf-8", newline="")))
+    assert list(failed[0].keys()) == FAILED_FIELDS
+    assert [(row["candidate_id"], row["source"]) for row in failed] == [("ERR", "mock")]
+    decisions = [json.loads(line) for line in paths.experiment_decisions.read_text(encoding="utf-8").splitlines()]
+    assert [(row["candidate_id"], row["source"]) for row in decisions] == [("LIVE", "live"), ("MOCK", "mock"), ("ERR", "mock")]
+
+
+def test_recorder_tags_mock_metrics_as_mock_even_when_source_says_live(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    mock = {"candidate_id": "M", "family": "f", "expression": "rank(close)", "result_id": "abc", "metrics": {"fitness": 1.5, "sharpe": 1.4, "alpha_id": "mock-abc"}}
+
+    record_research_artifacts(research_dir, [mock], [], source="live")
+
+    rows = list(csv.DictReader(paths.passed_alphas.open(encoding="utf-8", newline="")))
+    assert rows[0]["source"] == "mock"
+    with pytest.raises(ValueError, match="source must be one of"):
+        record_research_artifacts(research_dir, [mock], [], source="staging")
+
+
+def test_append_csv_keeps_an_unknown_header_as_is(tmp_path):
+    from app.research import _append_csv
+
+    path = tmp_path / "custom.csv"
+    path.write_text("candidate_id,extra,decision\nA,1,x\n", encoding="utf-8")
+
+    _append_csv(path, PASSED_FIELDS, [{"candidate_id": "B", "decision": "y", "source": "live"}])
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "candidate_id,extra,decision"
+    assert lines[1:] == ["A,1,x", "B,,y"]
+
+
+def test_load_family_memory_reports_corrupt_file_instead_of_empty_memory(tmp_path):
+    from app.research import load_family_memory, summarize_workflow_state
+
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    paths.family_memory.parent.mkdir(parents=True, exist_ok=True)
+    paths.family_memory.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="corrupt") as exc_info:
+        load_family_memory(research_dir)
+    assert str(paths.family_memory) in str(exc_info.value)
+    with pytest.raises(ValueError, match="corrupt"):
+        summarize_workflow_state(research_dir)
+    with pytest.raises(ValueError, match="corrupt"):
+        record_research_artifacts(research_dir, [{"candidate_id": "A", "family": "f", "expression": "rank(close)", "result_id": "r", "metrics": {"fitness": 1.0}}], [])
+    # the damaged file is left for the user to repair, not overwritten by an empty memory
+    assert paths.family_memory.read_text(encoding="utf-8") == "{not json"
+
+    paths.family_memory.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError, match="expected a JSON object"):
+        load_family_memory(research_dir)
+
+
+def test_is_mock_metrics_recognizes_alpha_id_prefix():
+    from app.research import _is_mock_metrics
+
+    assert _is_mock_metrics({"raw": {"mode": "mock"}})
+    assert _is_mock_metrics({"alpha_id": "mock-abc", "raw": {}})
+    assert not _is_mock_metrics({"alpha_id": "O0ovlO0R", "raw": {"is": {}}})
+    assert not _is_mock_metrics({})

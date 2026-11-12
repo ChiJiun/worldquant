@@ -149,3 +149,81 @@ def test_build_attribution_falls_back_to_passed_alphas_csv_for_manual_parent(tmp
     assert report["vs_parent"]["improved"] == ["fitness", "turnover"]
     assert report["vs_parent"]["worsened"] == ["sharpe"]
     assert set(report["vs_parent"]["missing"]) == {"returns", "margin", "drawdown"}
+
+
+def test_compare_metrics_is_incomparable_when_the_parent_has_no_metrics():
+    comparison = compare_metrics({"metrics": {"fitness": 1.5}}, {"metrics": {}})
+
+    assert comparison["verdict"] == "incomparable"
+    assert comparison["deltas"] == {}
+    assert comparison["unchanged"] == []
+
+    memory = {"families": {}, "global_best": None}
+    parent = _snapshot("P_ERR")  # error row: no metrics at all
+    child = _snapshot("C1", metadata={"parent_candidate_id": "P_ERR", "changed_dimension": "decay"}, fitness=1.1)
+    memory = {"families": {"f": {"best_candidate": child, "recent_candidates": [parent, child]}}, "global_best": child}
+
+    report = build_attribution(memory, "C1")
+
+    assert report["verdict"] == "incomparable"
+    assert "no comparable metrics" in report["next_action_hint"]
+    assert "drop it" not in report["next_action_hint"]
+
+
+def test_find_in_alpha_csv_skips_error_rows_without_metrics(tmp_path):
+    from app.attribution import find_in_alpha_csv
+
+    failed = tmp_path / "failed_alphas.csv"
+    failed.write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision,dominant_bottleneck,error_type,error",
+                "2026-05-22T02:31:02Z,P1,f,rank(close),alpha-p,0.9,0.8,0.05,0.1,0.3,record_failure,sharpe_too_low,,",
+                "2026-05-23T02:31:02Z,P1,f,rank(close),,,,,,,record_failure,platform_timeout,TimeoutError,timed out",
+                "2026-05-24T02:31:02Z,P2,f,rank(open),,,,,,,record_failure,platform_error,RuntimeError,boom",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    found = find_in_alpha_csv(failed, "P1")
+
+    assert found["result_id"] == "alpha-p"
+    assert found["metrics"]["fitness"] == 0.8
+    assert find_in_alpha_csv(failed, "P2") is None
+    assert find_in_alpha_csv(failed, "P1", result_id="alpha-x") is None
+
+
+def test_build_attribution_result_id_picks_the_reused_candidate_and_warns_otherwise():
+    first = _snapshot("DUP", family="a", fitness=1.0, sharpe=1.0)
+    first["result_id"] = "alpha-a"
+    second = _snapshot("DUP", family="b", fitness=2.0, sharpe=2.0)
+    second["result_id"] = "alpha-b"
+    memory = {
+        "families": {
+            "a": {"best_candidate": first, "recent_candidates": [first]},
+            "b": {"best_candidate": second, "recent_candidates": [second]},
+        },
+        "global_best": second,
+    }
+
+    report = build_attribution(memory, "DUP")
+    assert report["result_id"] == "alpha-a"
+    assert "appears in families ['a', 'b']" in report["warning"]
+    assert "alpha-a" in report["warning"]
+
+    report = build_attribution(memory, "DUP", result_id="alpha-b")
+    assert report["result_id"] == "alpha-b"
+    assert report["family"] == "b"
+    assert "warning" not in report
+
+    report = build_attribution(memory, result_id="alpha-b")
+    assert report["candidate_id"] == "DUP"
+    assert report["vs_global_best"] == {"status": "is_global_best"}
+
+    with pytest.raises(ValueError, match=r"DUP \(result_id=alpha-404\)"):
+        build_attribution(memory, "DUP", result_id="alpha-404")
+    with pytest.raises(ValueError, match=r"<global_best> \(result_id=alpha-a\)"):
+        build_attribution(memory, result_id="alpha-a")
+    assert find_candidate(memory, "DUP", result_id="alpha-b") is second

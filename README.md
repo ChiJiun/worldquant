@@ -147,20 +147,19 @@ logs/
 Copy-Item .env.example .env
 ```
 
-先用 mock 跑通本機流程：
+先用 mock 跑通本機流程。`.env` 保持預設的 `WQ_DRY_RUN=true` 即可。dry-run 下 `simulate` 預設會被擋（exit code 2），要加 `--allow-mock` 才會跑；放行後寫進 `research/` 的列會在 `source` 欄標成 `mock`，`select-alphas` 會跳過它們。即使如此，smoke run 還是不要對真實研究資料跑：用單次 shell 環境變數把路徑指到暫存目錄（shell 變數會覆蓋 `.env` 的值，而且不會留在 `.env` 裡影響之後的 live run）：
 
-```env
-WQ_DRY_RUN=true
-WQ_CLIENT_MODE=requests
+```powershell
+$env:WQ_DRY_RUN = "true"
+$env:WQ_RESEARCH_DIR = "C:\tmp\wq-smoke\research"
+$env:WQ_OUTPUT_DIR = "C:\tmp\wq-smoke\outputs"
+$env:WQ_CANDIDATE_FILE = "C:\tmp\wq-smoke\candidates.jsonl"
+$env:WQ_LOG_DIR = "C:\tmp\wq-smoke\logs"
+C:\Users\USER\anaconda3\python.exe -m app init-data
+C:\Users\USER\anaconda3\python.exe -m app simulate --allow-mock --limit 1 --current-run
 ```
 
-注意：dry-run 的 `simulate` 不會被擋，mock 結果會照常寫進 `research/logs/*` 與 `family_memory.json`，而且 passed/failed CSV 上沒有 mock 標記（`result_id` 是 expression 的 md5 前 12 碼）。要跑通流程時把路徑指到暫存目錄，不要對真實研究資料跑：
-
-```env
-WQ_RESEARCH_DIR=C:\tmp\wq-smoke\research
-WQ_OUTPUT_DIR=C:\tmp\wq-smoke\outputs
-WQ_CANDIDATE_FILE=C:\tmp\wq-smoke\candidates.jsonl
-```
+跑完後開新的 shell，或用 `Remove-Item Env:WQ_RESEARCH_DIR` 等指令清掉這些變數。
 
 要打 live API 時：
 
@@ -308,6 +307,8 @@ C:\Users\USER\anaconda3\python.exe -m app simulate --expression "rank(close)" --
 C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1
 ```
 
+在 `WQ_DRY_RUN=true` 或 `WQ_CLIENT_MODE=mock` 下，`simulate` 會直接報錯（exit code 2）而不會送出 mock 結果，避免把合成數據寫進真實研究日誌。只有為了跑通流程時加 `--allow-mock`：此時 recorder 會在 `research/logs/experiment_decisions.jsonl` 與 `passed_alphas.csv` / `failed_alphas.csv` 的 `source` 欄標 `mock`（真實結果是 `live`），`outputs/current_run/summary.json` 也會帶 `source`，而 `select-alphas` 會跳過 `source=mock` 的列。舊的 CSV 沒有 `source` 欄，第一次 append 時會補上欄位，舊列留空並視為 live。
+
 策略型 simulation settings 不建議寫在 `.env`。`.env` 只放帳密、API、timeout、路徑等執行環境；Instrument Type、Region、Universe、Language、Decay、Delay、Truncation、Neutralization、Pasteurization、Lookback、Max Trade、Max Position 由 LLM 依策略在每次實驗指定。
 
 最推薦寫在 `data/candidates.jsonl` 的 candidate metadata，讓公式和設定一起被保存：
@@ -368,7 +369,9 @@ C:\Users\USER\anaconda3\python.exe -m app attribute
 C:\Users\USER\anaconda3\python.exe -m app attribute --candidate-id ANALYST_REV_001
 ```
 
-輸出包含 `vs_parent` / `vs_family_best` / `vs_global_best` 每個指標的 from/to/delta、`improved` / `worsened` 清單、整體 `verdict`（`net_improvement`、`improvement_with_trade_off`、`trade_off`、`regression_with_trade_off`、`regression`、`unchanged`）與下一步提示。父代由 candidate 的 `parent_candidate_id` 決定，依序從 family memory、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv` 找（手動用 `record-passed-alpha` 補登的父代只在 CSV）；同一份歸因也會在每次 simulate 後自動寫進 `research/logs/experiment_decisions.jsonl` 每筆成功結果的 `latest_vs_parent`（simulate 失敗的 error row 沒有指標可比，不帶這個欄位）。沒寫 `parent_candidate_id` 的 candidate 會得到 `no_parent_recorded`。
+輸出包含 `vs_parent` / `vs_family_best` / `vs_global_best` 每個指標的 from/to/delta、`improved` / `worsened` 清單、整體 `verdict`（`net_improvement`、`improvement_with_trade_off`、`trade_off`、`regression_with_trade_off`、`regression`、`unchanged`、`incomparable`）與下一步提示。`unchanged` 是所有可比指標都相同；`incomparable` 是父代連一個可比指標都沒有（例如父代最後一筆是平台錯誤的 error row），此時只有 family / global 比較可用。父代由 candidate 的 `parent_candidate_id` 決定，依序從 family memory、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv` 找（手動用 `record-passed-alpha` 補登的父代只在 CSV；CSV 中沒有任何指標的 error row 會被跳過，改取同 candidate 更早有指標的列）；同一份歸因也會在每次 simulate 後自動寫進 `research/logs/experiment_decisions.jsonl` 每筆成功結果的 `latest_vs_parent`（simulate 失敗的 error row 沒有指標可比，不帶這個欄位）。沒寫 `parent_candidate_id` 的 candidate 會得到 `no_parent_recorded`。
+
+同一個 `candidate_id` 曾在不同 family 重用時，`attribute` 會取 family memory 裡最先找到的那條並在報告加 `warning`（也印到 stderr）；用 `--result-id <alpha id>` 指定要看哪一條。
 
 驗證 candidate（預設 global best），並在平台 SELF_CORRELATION 還是 PENDING 時改用 `fetch-correlations` 的快取：
 
@@ -379,7 +382,7 @@ C:\Users\USER\anaconda3\python.exe -m app validate-candidate --candidate-id ANAL
 
 `--refresh` 會用 candidate 的 `result_id` 重新從 BRAIN 抓 alpha（PENDING 的 checks 通常會變成結果）、更新 `family_memory.json` 裡**同一個 `result_id`** 的所有快照（同名 candidate 但指向別的 alpha 的快照不會被動到），並順便把它的 self-correlation 寫進 `research/state/alpha_correlations.json`。需要 live client；`WQ_DRY_RUN=true` 下會直接報錯。
 
-同一個 `candidate_id` 曾在不同 family 重用時，報告會多一個 `warning` 說明選到哪個 `result_id`；用 `--result-id <alpha id>` 可以明確指定要驗證哪一條。找不到 candidate 或 memory 檔不存在時會印出錯誤訊息並以 exit code 1 結束，不會噴 traceback。改用快取判定的 self_corr check 會帶 `fetched_at`，太舊就先 `fetch-correlations --refresh`。
+同一個 `candidate_id` 曾在不同 family 重用時，報告會多一個 `warning` 說明選到哪個 `result_id`；用 `--result-id <alpha id>` 可以明確指定要驗證哪一條。只給 `--result-id` 不給 `--candidate-id` 時，會用 alpha id 跨所有 family 搜尋，不會被忽略而默默驗證 global best。找不到 candidate、memory 檔不存在、memory 檔不是合法 JSON（訊息會寫 corrupt，不會當成空的覆蓋掉）、live client 的連線或平台錯誤、mock client 的未知 id，都會印出 `error:` 並以 exit code 1 結束，不會噴 traceback。改用快取判定的 self_corr check 會帶 `fetched_at`，太舊就先 `fetch-correlations --refresh`。
 
 手動補登一條已驗證的 passed alpha（取代以前散落在根目錄的 append_*.py 腳本）：
 
@@ -411,8 +414,9 @@ C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --limit 20 --refres
 
 - `--kind self|prod|both`：self 是跟自己帳號已提交 alpha 的相關性（BRAIN 提交門檻 0.7），`select-alphas` 只用這個。prod 是跟全平台 alpha 的相關性分布，目前只存進快取供人工參考，selection 不使用。
 - 已快取（有數值）的 alpha 預設跳過；`--refresh` 強制重抓，提交新 alpha 後記得跑一次。`--limit N` 限制這次最多打 N 次 API（失敗的呼叫也算），方便分批。
-- BRAIN 計算中會回 `Retry-After`，程式會照平台要求等待（不低於 `WQ_POLL_INTERVAL_SECONDS`、上限 60 秒），最多重試 `WQ_MAX_POLL_ATTEMPTS` 次。
-- 在 `WQ_DRY_RUN=true` 或 mock client 下這個指令會直接報錯：mock 寫入的結果會被當成「平台已確認不相關」，讓已提交 gate 失效。只有為了跑通流程時加 `--allow-mock`，此時寫入的是沒有數值的空項目，`select-alphas` 會視為沒有快取，之後 live 執行也會把它重抓。
+- BRAIN 計算中會回 `Retry-After`，程式會照平台要求等待：上限 60 秒，下限是 `WQ_POLL_INTERVAL_SECONDS`（沒設時至少 1 秒），而且下限優先，所以設定間隔超過 60 秒時仍以設定為準；最多重試 `WQ_MAX_POLL_ATTEMPTS` 次。
+- 在 `WQ_DRY_RUN=true` 或 mock client 下這個指令會直接報錯：mock 寫入的結果會被當成「平台已確認不相關」，讓已提交 gate 失效。只有為了跑通流程時加 `--allow-mock`，此時寫入的是沒有數值的空項目，`select-alphas` 會視為沒有快取，之後 live 執行也會把它重抓；報告裡的 `fetched_at` 只會對有數值的項目印出。
+- 快取檔格式版本是 2。版本不符（例如舊版 1，可能含早期 mock 寫出的 `0.0`）或不是合法 JSON 的檔會被當成空的並寫 log，寫入新快取前會把舊檔改名為 `alpha_correlations.json.v1` / `alpha_correlations.json.corrupt`（已存在就加流水號），報告帶 `previous_cache_status` 與 `previous_cache_backup`。升版後舊的 live 快取要重抓一次。
 
 跑測試：
 
@@ -467,9 +471,9 @@ LLM 只能做研究判斷，不直接替代回測或 validation。
 
 ### Submit Queue Gate
 
-`python -m app select-alphas` 不是單純排序 passed alpha。它會做三層 gate：
+`python -m app select-alphas` 不是單純排序 passed alpha。讀 `passed_alphas.csv` 時先排除 `source=mock` 的列（`simulate --allow-mock` 寫出的合成結果；報告與 `correlation_report.md` 會印 `mock_rows_skipped`，沒有 `source` 欄的舊列視為 live），然後做三層 gate：
 
-1. **變體內選 best**：兩條 alpha 只要任一訊號過門檻就進同一 cluster：BRAIN self-correlation 快取裡彼此的 |correlation| >= 0.7，或表達式結構相似度（同 parent、同 core signal/direction、field/operator Jaccard）>= 0.85。注意 BRAIN self-correlation 只會列出該帳號已提交的 alpha，兩條尚未提交的候選不會互相出現，所以候選之間的 clustering 實務上多半仍是結構代理在做。每個 cluster 只保留 quality score 最高者。
+1. **變體內選 best**：兩條 alpha 只要任一訊號過門檻就進同一 cluster：BRAIN self-correlation 快取裡彼此的 |correlation| >= 0.7，或表達式結構相似度（同 parent、同 core signal/direction、field/operator Jaccard）>= 0.85。注意 BRAIN self-correlation 只會列出該帳號已提交的 alpha，兩條尚未提交的候選不會互相出現，所以候選之間的 clustering 實務上多半仍是結構代理在做。每個 cluster 只保留 quality score 最高者。`outputs/alpha_correlation_matrix.csv` 裡只有平台值過門檻的配對寫平台值，其他配對一律寫結構分數，不混用尺度。
 2. **經濟意涵檢查**：candidate 的 expression fingerprint 必須和 family/hypothesis 的 core signal 一致；例如 news hypothesis 不應最後變成純 return-reversal。
 3. **已提交相關性檢查**：cluster winner 同時看兩個訊號，任一過門檻就擋：BRAIN self-correlation 快取回報的帶號 max correlation >= 0.7（`replaced_by` 填平台列出的最相關 alpha id），或與 `research/submissions/submitted_alphas.csv` 的結構相似度 >= 0.85。平台數值優先，但結構比對是快取過舊時的安全網：提交新 alpha 後沒 `--refresh`，表達式一模一樣的候選仍會被擋。gate 用的是帶號值，與 BRAIN 的 SELF_CORRELATION check 一致，所以強負相關不會擋提交（clustering 則用絕對值）。被擋的 alpha 不進 `outputs/submit_queue.csv`。`correlation_report.md` 會印出快取裡最舊的 `fetched_at`，太舊就重抓。
 

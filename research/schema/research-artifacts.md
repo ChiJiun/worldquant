@@ -19,6 +19,12 @@ Runtime artifacts are intentionally ignored by git.
 
 If a result should be shared, summarize it in `docs/` or place a sanitized miniature example under `research/examples/`.
 
+## Passed / Failed Alpha CSV Columns
+
+`passed_alphas.csv` columns (`PASSED_FIELDS` in `app/research.py`): `recorded_at`, `candidate_id`, `family`, `expression`, `result_id`, `sharpe`, `fitness`, `returns`, `drawdown`, `turnover`, `decision`, `source`. `failed_alphas.csv` adds `dominant_bottleneck`, `error_type`, `error`.
+
+`source` is `live` for results fetched from BRAIN and `mock` for rows written by `python -m app simulate --allow-mock` (the `MockBrainClient`); the same tag is stored in every `experiment_decisions.jsonl` row. `select-alphas` skips `source=mock` rows and reports how many it skipped as `mock_rows_skipped`. A CSV written before the column existed is upgraded in place on the next append: the header gains `source` and existing rows keep an empty value, which readers treat as `live`. `record-passed-alpha` always writes `live` because it requires a BRAIN alpha id.
+
 ## Submit Queue Gates
 
 `python -m app select-alphas` writes `outputs/submit_queue.csv` only after:
@@ -31,6 +37,8 @@ Submitted alpha rows should include at least `alpha_id` and `expression`. When `
 
 ## Correlation Cache
 
-`python -m app fetch-correlations` stores `{"version": 1, "updated_at": ..., "alphas": {alpha_id: {"self": {...}, "prod": {...}}}}`. Each entry keeps `max_correlation`, `min_correlation`, `record_count`, `records` (schema-zipped rows from BRAIN) and `fetched_at`. Pairwise clustering uses `|correlation|` from the `self` records; the submit gate uses the signed `max_correlation`. An entry whose `max_correlation` is `null` (written by `--allow-mock` smoke runs) is ignored by selection and refetched on the next live run. `prod` entries are stored for reference only. `correlation_report.md` prints the oldest `fetched_at` so a stale cache is visible.
+`python -m app fetch-correlations` stores `{"version": 2, "updated_at": ..., "alphas": {alpha_id: {"self": {...}, "prod": {...}}}}`. Each entry keeps `max_correlation`, `min_correlation`, `record_count`, `records` (schema-zipped rows from BRAIN) and `fetched_at`. Pairwise clustering uses `|correlation|` from the `self` records; the submit gate uses the signed `max_correlation`. An entry whose `max_correlation` is `null` (written by `--allow-mock` smoke runs) is ignored by selection, has no `fetched_at` to report, and is refetched on the next live run. `prod` entries are stored for reference only. `correlation_report.md` prints the oldest `fetched_at` so a stale cache is visible.
+
+A file whose `version` is not the current `CACHE_VERSION` (version 1 files may contain `0.0` values written by an early mock client) or that is not valid JSON loads as an empty cache with a warning in the log. Before the next write it is renamed to `alpha_correlations.json.v<old>` or `alpha_correlations.json.corrupt` (a counter is appended when that name exists) and the `fetch-correlations` report lists it as `previous_cache_backup`; nothing is overwritten.
 
 Use `--finalize-run` to write the structured final state. Use `--clear-candidates` only after the current candidate input has already been simulated and selected. `passed_alphas.csv` remains cumulative because removing it would erase the candidate pool needed for future clustering.

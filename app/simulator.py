@@ -7,10 +7,10 @@ import json
 import shutil
 import time
 
-from app.api import BrainClient
+from app.api import BrainClient, MockBrainClient
 from app.config import Settings
 from app.models import AlphaCandidate, SimulationMetrics, utc_now_iso
-from app.research import record_research_artifacts
+from app.research import SOURCE_LIVE, SOURCE_MOCK, record_research_artifacts
 
 
 TERMINAL_SUCCESS = {"complete", "completed", "done"}
@@ -111,12 +111,18 @@ class SimulateRunner:
             "total": len(candidates),
             "succeeded": len(results),
             "failed": len(errors),
+            "source": self.source,
             "settings": self.settings.simulation_settings_payload(),
             "created_at": utc_now_iso(),
         }
         (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        record_research_artifacts(self.settings.research_dir, results, errors)
+        record_research_artifacts(self.settings.research_dir, results, errors, source=self.source)
         return run_dir
+
+    @property
+    def source(self) -> str:
+        """``mock`` when results come from ``MockBrainClient``, else ``live``; tags every research row."""
+        return SOURCE_MOCK if isinstance(self.client, MockBrainClient) else SOURCE_LIVE
 
     def _run_one(self, candidate: AlphaCandidate) -> Dict[str, Any]:
         handle = self.client.simulate(candidate)

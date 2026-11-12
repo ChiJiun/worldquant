@@ -154,9 +154,10 @@ class RequestsBrainClient(BrainClient):
     def _retry_delay(self, retry_after: str) -> float:
         """Seconds to wait before polling a correlation endpoint again.
 
-        BRAIN's ``Retry-After`` is honoured (never polling faster than it asks) up to
-        ``MAX_RETRY_AFTER_SECONDS``; the configured poll interval is the floor, and an unparsable or
-        non-positive header falls back to that interval (at least one second so the loop cannot spin).
+        BRAIN's ``Retry-After`` is honoured up to ``MAX_RETRY_AFTER_SECONDS`` and never below the floor:
+        the configured poll interval, or one second when no interval is configured, so the loop cannot
+        spin. The floor wins over the cap, so a poll interval above the cap is still respected. An
+        unparsable or non-positive header falls back to the floor.
         """
         floor = self.settings.poll_interval_seconds if self.settings.poll_interval_seconds > 0 else 1.0
         try:
@@ -165,7 +166,7 @@ class RequestsBrainClient(BrainClient):
             return floor
         if delay <= 0:
             return floor
-        return min(max(delay, self.settings.poll_interval_seconds), MAX_RETRY_AFTER_SECONDS)
+        return max(min(delay, MAX_RETRY_AFTER_SECONDS), floor)
 
     @staticmethod
     def _has_correlation_payload(data: Dict[str, Any]) -> bool:

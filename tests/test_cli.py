@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import csv
 import json
 
 import pytest
@@ -60,6 +61,7 @@ def test_simulate_accepts_per_run_setting_overrides(settings, monkeypatch):
 
     exit_code = main([
         "simulate",
+        "--allow-mock",
         "--limit",
         "1",
         "--current-run",
@@ -264,3 +266,176 @@ def test_validate_candidate_cli_refuses_refresh_in_dry_run(settings, monkeypatch
 
     assert exc_info.value.code == 2
     assert "needs a live BRAIN client" in capsys.readouterr().err
+
+
+def test_simulate_cli_refuses_mock_client_without_allow_mock(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    settings.ensure_directories()
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A1","family":"manual","expression":"rank(close)"}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["simulate", "--limit", "1", "--current-run"])
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "needs a live BRAIN client" in err
+    assert "--allow-mock" in err
+    assert not (Path("research") / "logs").exists()
+    assert not (Path("outputs") / "current_run").exists()
+
+
+def test_simulate_cli_allow_mock_tags_rows_and_select_alphas_skips_them(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    settings.ensure_directories()
+    settings.candidate_file.write_text(
+        '{"candidate_id":"A1","family":"manual","expression":"rank(close)"}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = main(["simulate", "--allow-mock", "--limit", "1", "--current-run"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "source=mock" in captured.err
+    logs_dir = Path("research") / "logs"
+    passed_rows = list(csv.DictReader((logs_dir / "passed_alphas.csv").open(encoding="utf-8", newline="")))
+    assert [row["candidate_id"] for row in passed_rows] == ["A1"]
+    assert passed_rows[0]["source"] == "mock"
+    decision = json.loads((logs_dir / "experiment_decisions.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert decision["source"] == "mock"
+    summary = json.loads((Path("outputs") / "current_run" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["source"] == "mock"
+
+    exit_code = main(["select-alphas"])
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["record_count"] == 0
+    assert report["mock_rows_skipped"] == 1
+    assert report["submit_queue_count"] == 0
+    assert "mock_rows_skipped: 1" in (Path("outputs") / "correlation_report.md").read_text(encoding="utf-8")
+
+
+def test_result_cli_turns_mock_key_error_into_error_exit(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    exit_code = main(["result", "no-such-alpha"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.startswith("error: KeyError: ")
+    assert "no-such-alpha" in captured.err
+
+
+def _write_memory_with_reused_candidate_id(research_dir):
+    state_dir = research_dir / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    first = {"candidate_id": "DUP", "family": "a", "expression": "rank(close)", "result_id": "alpha-a", "metrics": {"fitness": 1.0, "sharpe": 1.0}}
+    second = {"candidate_id": "DUP", "family": "b", "expression": "rank(open)", "result_id": "alpha-b", "metrics": {"fitness": 2.0, "sharpe": 2.0}}
+    (state_dir / "family_memory.json").write_text(
+        json.dumps(
+            {
+                "families": {
+                    "a": {"best_candidate": first, "recent_candidates": [first]},
+                    "b": {"best_candidate": second, "recent_candidates": [second]},
+                },
+                "global_best": second,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_attribute_cli_result_id_picks_reused_candidate_and_warns_without_it(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    _write_memory_with_reused_candidate_id(Path("research"))
+
+    exit_code = main(["attribute", "--candidate-id", "DUP"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["result_id"] == "alpha-a"
+    assert "appears in families ['a', 'b']" in payload["warning"]
+    assert captured.err.startswith("warning: ")
+
+    exit_code = main(["attribute", "--candidate-id", "DUP", "--result-id", "alpha-b"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["result_id"] == "alpha-b"
+    assert payload["expression"] == "rank(open)"
+    assert "warning" not in payload
+    assert captured.err == ""
+
+    exit_code = main(["attribute", "--candidate-id", "DUP", "--result-id", "alpha-404"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "result_id=alpha-404" in captured.err
+
+
+def test_validate_candidate_cli_result_id_alone_is_not_ignored(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    _write_memory_with_reused_candidate_id(Path("research"))
+
+    exit_code = main(["validate-candidate", "--result-id", "alpha-a"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["result_id"] == "alpha-a"
+    assert payload["candidate_id"] == "DUP"
+    assert payload["expression"] == "rank(close)"
+
+    exit_code = main(["validate-candidate", "--result-id", "alpha-404"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "result_id=alpha-404" in captured.err
+
+
+def test_validate_and_attribute_cli_report_corrupt_family_memory(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    state_dir = Path("research") / "state"
+    state_dir.mkdir(parents=True)
+    (state_dir / "family_memory.json").write_text("{not json", encoding="utf-8")
+
+    assert main(["validate-candidate", "--candidate-id", "A1"]) == 1
+    err = capsys.readouterr().err
+    assert "corrupt" in err
+    assert "missing or empty" not in err
+
+    assert main(["attribute"]) == 1
+    assert "corrupt" in capsys.readouterr().err
+
+    assert main(["research"]) == 1
+    assert "corrupt" in capsys.readouterr().err
+    assert (state_dir / "family_memory.json").read_text(encoding="utf-8") == "{not json"
+
+
+def test_fetch_correlations_cli_default_alpha_ids_fall_back_to_legacy_passed_alphas(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+    legacy = Path("research") / "passed_alphas.csv"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision",
+                '2026-05-10T00:00:00Z,A1,pv,"rank(close)",alpha-legacy,1.3,1.1,0.10,0.05,0.20,validate_best_candidate',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["fetch-correlations", "--allow-mock"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requested_alpha_count"] == 1
+    assert payload["fetched"][0]["alpha_id"] == "alpha-legacy"

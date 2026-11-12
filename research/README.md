@@ -15,8 +15,8 @@ Ignored local files:
 - `state/best_alphas.txt`: human-readable best candidate summary.
 - `state/portfolio.json`: local portfolio or champion pool state.
 - `logs/experiment_decisions.jsonl`: append-only experiment decisions.
-- `logs/passed_alphas.csv`: candidates that reached the validation gate.
-- `logs/failed_alphas.csv`: failed candidates and platform errors.
+- `logs/passed_alphas.csv`: candidates that reached the validation gate. The `source` column is `live` or `mock`; `select-alphas` skips `mock` rows (see `schema/research-artifacts.md`).
+- `logs/failed_alphas.csv`: failed candidates and platform errors (same `source` column).
 - `logs/validation_reports.jsonl` and `logs/validation_reports.csv`: persisted validation reports.
 - `state/alpha_correlations.json`: BRAIN self/prod correlation cache written by `python -m app fetch-correlations`; `select-alphas` prefers it over the structural proxy.
 - `submissions/submitted_alphas.csv`: local submission tracking.

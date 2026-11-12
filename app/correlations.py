@@ -3,10 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import json
+import logging
 
 from app.models import CorrelationResult, utc_now_iso
 
-CACHE_VERSION = 1
+LOGGER = logging.getLogger(__name__)
+
+# Version 1 caches may hold ``max_correlation: 0.0`` entries written by an early mock client, which
+# look like a real platform number; bumping to 2 retires them (they are reloaded as empty and backed up).
+CACHE_VERSION = 2
+CACHE_STATUS_OK = "ok"
+CACHE_STATUS_MISSING = "missing"
+CACHE_STATUS_CORRUPT = "corrupt"
+CACHE_STATUS_STALE_VERSION = "stale_version"
 # BRAIN's SELF_CORRELATION submission check fails at or above this value.
 SELF_CORRELATION_THRESHOLD = 0.7
 RECORD_ID_KEYS = ("id", "alpha_id", "alphaId", "alpha")
@@ -56,21 +65,72 @@ def parse_correlation_payload(alpha_id: str, kind: str, data: Dict[str, Any]) ->
 
 
 def load_correlation_cache(path: Path) -> Dict[str, Dict[str, Any]]:
-    """Return ``{alpha_id: {"self": {...}, "prod": {...}}}`` or ``{}`` when the cache is absent/corrupt."""
-    if not path.exists():
+    """Return ``{alpha_id: {"self": {...}, "prod": {...}}}``.
+
+    A missing file, a corrupt file or a file written by an older ``CACHE_VERSION`` all load as ``{}``
+    (the latter two with a warning in the log); ``save_correlation_cache`` moves such a file aside
+    instead of overwriting it.
+    """
+    status, payload = inspect_correlation_cache(path)
+    if status == CACHE_STATUS_CORRUPT:
+        LOGGER.warning("Correlation cache %s is not valid JSON; treating it as empty", path)
         return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    if status == CACHE_STATUS_STALE_VERSION:
+        LOGGER.warning(
+            "Correlation cache %s has version %s but this code expects %s; treating it as empty (rerun fetch-correlations)",
+            path,
+            payload.get("version") if isinstance(payload, dict) else None,
+            CACHE_VERSION,
+        )
         return {}
-    alphas = payload.get("alphas") if isinstance(payload, dict) else None
+    if status != CACHE_STATUS_OK:
+        return {}
+    alphas = payload.get("alphas")
     return {str(key): value for key, value in alphas.items() if isinstance(value, dict)} if isinstance(alphas, dict) else {}
 
 
-def save_correlation_cache(path: Path, cache: Dict[str, Dict[str, Any]]) -> None:
+def inspect_correlation_cache(path: Path) -> Tuple[str, Any]:
+    """Classify the cache file as ok / missing / corrupt / stale_version and return the parsed payload."""
+    if not path.exists():
+        return CACHE_STATUS_MISSING, None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return CACHE_STATUS_CORRUPT, None
+    if not isinstance(payload, dict):
+        return CACHE_STATUS_CORRUPT, payload
+    if payload.get("version") != CACHE_VERSION:
+        return CACHE_STATUS_STALE_VERSION, payload
+    return CACHE_STATUS_OK, payload
+
+
+def save_correlation_cache(path: Path, cache: Dict[str, Dict[str, Any]]) -> Optional[Path]:
+    """Write the cache; a corrupt or stale-version file at ``path`` is renamed first and its new path returned."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    backup = backup_unusable_correlation_cache(path)
     payload = {"version": CACHE_VERSION, "updated_at": utc_now_iso(), "alphas": cache}
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return backup
+
+
+def backup_unusable_correlation_cache(path: Path) -> Optional[Path]:
+    """Move a corrupt or stale-version cache file to ``<name>.corrupt`` / ``<name>.v<old>`` so it is not overwritten."""
+    status, payload = inspect_correlation_cache(path)
+    if status == CACHE_STATUS_CORRUPT:
+        suffix = ".corrupt"
+    elif status == CACHE_STATUS_STALE_VERSION:
+        old_version = payload.get("version") if isinstance(payload, dict) else None
+        suffix = f".v{old_version}" if isinstance(old_version, int) else ".stale"
+    else:
+        return None
+    backup = path.with_name(path.name + suffix)
+    counter = 1
+    while backup.exists():
+        counter += 1
+        backup = path.with_name(f"{path.name}{suffix}.{counter}")
+    path.rename(backup)
+    LOGGER.warning("Moved unusable correlation cache %s to %s", path, backup)
+    return backup
 
 
 def update_correlation_cache(cache: Dict[str, Dict[str, Any]], result: CorrelationResult) -> None:
@@ -92,8 +152,11 @@ def has_self_correlation(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> boo
 
 
 def self_correlation_fetched_at(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> Optional[str]:
+    """``fetched_at`` of a valued ``self`` entry; a valueless (mock smoke-run) entry has no platform number to date."""
     entry = cache.get(alpha_id, {}).get(SELF_KIND)
-    value = entry.get("fetched_at") if isinstance(entry, dict) else None
+    if not isinstance(entry, dict) or _float(entry.get("max_correlation")) is None:
+        return None
+    value = entry.get("fetched_at")
     return str(value) if value else None
 
 
@@ -158,6 +221,7 @@ def fetch_correlations(
     for kind in kinds:
         if kind not in CORRELATION_KINDS:
             raise ValueError(f"Unknown correlation kind: {kind}")
+    cache_status, _payload = inspect_correlation_cache(cache_path)
     cache = load_correlation_cache(cache_path)
     fetched: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
@@ -187,8 +251,8 @@ def fetch_correlations(
                 "min_correlation": result.min_correlation,
                 "record_count": len(result.records),
             })
-    save_correlation_cache(cache_path, cache)
-    return {
+    backup = save_correlation_cache(cache_path, cache)
+    report = {
         "cache_path": str(cache_path),
         "requested_alpha_count": len(requested),
         "fetched": fetched,
@@ -197,6 +261,10 @@ def fetch_correlations(
         "stopped_at_limit": stopped_at_limit,
         "cached_alpha_count": len(cache),
     }
+    if backup is not None:
+        report["previous_cache_status"] = cache_status
+        report["previous_cache_backup"] = str(backup)
+    return report
 
 
 def _self_records(cache: Dict[str, Dict[str, Any]], alpha_id: str) -> List[Dict[str, Any]]:

@@ -87,7 +87,7 @@ def test_cache_roundtrip_and_lookups(tmp_path):
     assert self_correlation_between(loaded, "alpha-7", "alpha-1") == 0.35
     assert self_correlation_between(loaded, "alpha-1", "unknown") is None
     payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert "raw" not in payload["alphas"]["alpha-1"]["self"]
 
 
@@ -122,3 +122,56 @@ def test_fetch_correlations_skips_cached_respects_limit_and_records_errors(tmp_p
     assert {(item["alpha_id"], item["kind"]) for item in second["skipped"]} == {("alpha-1", "self")}
     assert {(item["alpha_id"], item["kind"]) for item in second["fetched"]} == {("alpha-1", "prod"), ("alpha-3", "self"), ("alpha-3", "prod")}
     assert second["cached_alpha_count"] == 2
+
+
+def test_load_cache_ignores_stale_version_and_save_moves_it_aside(tmp_path, caplog):
+    from app.correlations import save_correlation_cache
+
+    cache_path = tmp_path / "state" / "alpha_correlations.json"
+    cache_path.parent.mkdir(parents=True)
+    stale = {"version": 1, "alphas": {"alpha-1": {"self": {"max_correlation": 0.0, "records": []}}}}
+    cache_path.write_text(json.dumps(stale), encoding="utf-8")
+
+    with caplog.at_level("WARNING"):
+        assert load_correlation_cache(cache_path) == {}
+    assert "version 1" in caplog.text
+
+    backup = save_correlation_cache(cache_path, {})
+
+    assert backup == cache_path.with_name("alpha_correlations.json.v1")
+    assert json.loads(backup.read_text(encoding="utf-8")) == stale
+    assert json.loads(cache_path.read_text(encoding="utf-8")) == {"version": 2, "updated_at": json.loads(cache_path.read_text(encoding="utf-8"))["updated_at"], "alphas": {}}
+    # a second stale file gets a numbered backup instead of overwriting the first
+    cache_path.write_text(json.dumps(stale), encoding="utf-8")
+    assert save_correlation_cache(cache_path, {}) == cache_path.with_name("alpha_correlations.json.v1.2")
+
+
+def test_save_cache_backs_up_corrupt_file_and_fetch_reports_it(tmp_path):
+    cache_path = tmp_path / "alpha_correlations.json"
+    cache_path.write_text("{not json", encoding="utf-8")
+    client = MockBrainClient(RateLimiter(0.0))
+    client.correlation_payloads[("alpha-1", "self")] = SELF_PAYLOAD
+
+    report = fetch_correlations(client, ["alpha-1"], cache_path)
+
+    assert report["previous_cache_status"] == "corrupt"
+    backup = Path(report["previous_cache_backup"])
+    assert backup == cache_path.with_name("alpha_correlations.json.corrupt")
+    assert backup.read_text(encoding="utf-8") == "{not json"
+    assert load_correlation_cache(cache_path)["alpha-1"]["self"]["max_correlation"] == 0.81
+
+    report = fetch_correlations(client, ["alpha-1"], cache_path)
+    assert "previous_cache_backup" not in report
+
+
+def test_self_correlation_fetched_at_ignores_valueless_entries():
+    from app.correlations import self_correlation_fetched_at
+
+    cache = {
+        "valued": {"self": {"max_correlation": 0.3, "fetched_at": "2026-05-01T00:00:00Z"}},
+        "mock": {"self": {"max_correlation": None, "records": [], "fetched_at": "2026-05-02T00:00:00Z"}},
+    }
+
+    assert self_correlation_fetched_at(cache, "valued") == "2026-05-01T00:00:00Z"
+    assert self_correlation_fetched_at(cache, "mock") is None
+    assert self_correlation_fetched_at(cache, "missing") is None
