@@ -194,11 +194,17 @@ C:\Users\USER\anaconda3\python.exe -m app research --mode pass-alpha-improvement
 - `pass-alpha-search`
 - `pass-alpha-improvement`
 
-啟動研究 workflow（Claude Code 用 `/`，Codex 用 `$`）：
+啟動研究 workflow。Claude Code：
 
 ```text
 /worldquant-researcher-workflow
 /worldquant-researcher-workflow pass-alpha-search
+/worldquant-researcher-workflow pass-alpha-improvement
+```
+
+Codex 用同樣的 mode，只是前綴換成 `$`：
+
+```text
 $worldquant-researcher-workflow pass-alpha-improvement
 ```
 

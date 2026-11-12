@@ -30,8 +30,9 @@ Run every command with the interpreter that has this project installed (`.venv\S
 ## Safety
 
 - `.env` holds the user's BRAIN credentials. Never read, print, copy or commit its values; `python -m app settings` shows only `has_username` / `has_password`.
-- `simulate`, `login-check`, `result`, `fetch-correlations` and `validate-candidate --refresh` talk to the live BRAIN API when `WQ_DRY_RUN=false`. Run them only because the user asked for this workflow to run; never inside tests or as a "quick check". Under `WQ_DRY_RUN=true` they use `MockBrainClient` and the CLI refuses the calls that would poison research state (`fetch-correlations` without `--allow-mock`, `--fetch-metrics`, `--refresh`).
-- Do not edit files under `research/` by hand except `data/candidates.jsonl`-driven flows and `research/notes/`; the recorder owns `research/state/` and `research/logs/`.
+- `simulate`, `login-check`, `result`, `fetch-correlations`, `validate-candidate --refresh` and `record-passed-alpha --fetch-metrics` talk to the live BRAIN API when `WQ_DRY_RUN=false`. Run them only because the user asked for this workflow to run; never inside tests or as a "quick check".
+- `WQ_DRY_RUN=true` is the program default and what `.env.example` ships with. Under it every command uses `MockBrainClient`. Only three live-only calls are refused outright (`fetch-correlations` without `--allow-mock`, `record-passed-alpha --fetch-metrics`, `validate-candidate --refresh`); **`simulate` is not refused** and still appends mock results (`result_id=mock-...`, `raw.mode=mock`) to `research/logs/*` and `research/state/family_memory.json`, and `select-alphas` does not filter them out. Before step 5 run `python -m app settings` and confirm `dry_run=False` and `client_mode=requests`; if it says `dry_run=True`, stop and ask the user instead of simulating.
+- Do not edit files under `research/state/` or `research/logs/` by hand; the recorder owns them. Hand-maintained files are `research/notes/` and `research/submissions/submitted_alphas.csv` (one row per real submission); manually verified alphas go through `python -m app record-passed-alpha`.
 
 ## Core Rule
 
@@ -86,7 +87,7 @@ Perform one loop at a time. The overall workflow stops only when a pass-worthy c
    - Preserve the family mechanism. Use only fields/operators listed in `config/fields.json`. Do not copy public formulas directly.
    - Do not use `rank()` when amplitude is the edge unless prior reflection asks for it. Do not add filters unless the dominant bottleneck justifies it.
 
-4. **Write or overwrite one candidate in `data/candidates.jsonl`** with `candidate_id`, `family`, `expression`, `parent_candidate_id`, `changed_dimension`, `notes`, and optionally `simulation_settings`. `parent_candidate_id` and `changed_dimension` are what make `attribute` and the recorder's `latest_vs_parent` work; without them the round is unattributable.
+4. **Write or overwrite one candidate in `data/candidates.jsonl`** with `candidate_id`, `family`, `expression`, `parent_candidate_id`, `changed_dimension`, `notes`, and optionally `simulation_settings`. `parent_candidate_id` and `changed_dimension` are what make the parent comparison work: without them `attribute` and the recorder's `latest_vs_parent` report `no_parent_recorded` (family-best and global-best comparisons still run) and no family lesson is derived for the round.
 
    ```json
    {
@@ -102,9 +103,10 @@ Perform one loop at a time. The overall workflow stops only when a pass-worthy c
 
    Strategy settings never go into `.env`; it is for credentials, API paths, timeouts and local paths. Per-run overrides are also available on the CLI (`--decay`, `--delay`, `--truncation`, `--neutralization`, `--universe`, `--region`, `--instrument-type`, `--language`, `--pasteurization`, `--lookback`, `--max-trade`, `--max-position`); whichever you use, record it in `changed_dimension` and `notes`.
 
-5. **Run at most one simulation** unless the user asks for a batch:
+5. **Run at most one simulation** unless the user asks for a batch. Check the client mode first (see Safety): a dry-run simulate writes mock rows into the real research logs.
 
    ```powershell
+   python -m app settings
    python -m app simulate --limit 1 --current-run
    ```
 
@@ -129,7 +131,8 @@ Do not create a new file or directory for every research step. Fixed paths:
 - `research/logs/experiment_decisions.jsonl`, `passed_alphas.csv`, `failed_alphas.csv`: append-only, written by the recorder.
 - `research/state/best_alphas.txt`: overwritten best summary.
 - `research/state/alpha_correlations.json`: BRAIN correlation cache.
-- `research/submissions/submitted_alphas.csv`: local registry of submitted alphas; add a row after each real submission.
+- `research/submissions/submitted_alphas.csv`: local registry of submitted alphas; hand-maintained, add a row after each real submission (there is no CLI for it yet).
+- `research/logs/final_selection_reports.jsonl`, `research/state/latest_final_selection_report.json`: written by `select-alphas --finalize-run`.
 - `outputs/submit_queue.csv`, `outputs/final_alpha_recommendations.md`: selection output.
 
 Manually verified alphas that never went through the recorder are added with `python -m app record-passed-alpha ...`, never by editing the CSV.
