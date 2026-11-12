@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import csv
 import json
 
+from app.correlations import (
+    SELF_CORRELATION_THRESHOLD,
+    load_correlation_cache,
+    save_correlation_cache,
+    self_correlation_max,
+    update_correlation_cache,
+)
 from app.models import utc_now_iso
-from app.research_paths import ensure_research_layout, existing_or_new
+from app.research import load_family_memory, save_family_memory, update_candidate_metrics
+from app.research_paths import ensure_research_layout
 
 
 VALIDATION_CHECKS = [
@@ -28,21 +36,76 @@ CSV_FIELDS = [
 ]
 
 
-def validate_candidate_from_memory(research_dir: Path, candidate_id: Optional[str] = None, *, persist: bool = False) -> Dict[str, Any]:
+def validate_candidate_from_memory(
+    research_dir: Path,
+    candidate_id: Optional[str] = None,
+    *,
+    persist: bool = False,
+    refresh: bool = False,
+    client: Any = None,
+) -> Dict[str, Any]:
+    """Build the validation report for a candidate stored in family memory.
+
+    With ``refresh`` the alpha is re-fetched from BRAIN through ``client`` (so PENDING platform checks can
+    resolve), every stored snapshot of the candidate gets the new metrics, and its self-correlation is
+    pulled into ``research/state/alpha_correlations.json``.
+    """
     paths = ensure_research_layout(research_dir)
-    memory = _load_json(existing_or_new(paths.family_memory, research_dir / "family_memory.json", research_dir / "old" / "family_memory.json"))
+    memory = load_family_memory(research_dir)
     candidate = _select_candidate(memory, candidate_id)
     if candidate is None:
         raise ValueError(f"Candidate not found in family_memory.json: {candidate_id or '<global_best>'}")
 
-    report = _build_report(candidate)
+    refreshed: Optional[Dict[str, Any]] = None
+    if refresh:
+        candidate, refreshed = _refresh_candidate(research_dir, memory, candidate, client, paths.alpha_correlations)
+
+    cache = load_correlation_cache(paths.alpha_correlations)
+    report = _build_report(candidate, cache)
+    if refreshed is not None:
+        report["refreshed"] = refreshed
     if persist:
         _append_jsonl(paths.validation_reports_jsonl, [report])
         _append_csv(paths.validation_reports_csv, [_flat_report(report)])
     return report
 
 
-def _build_report(candidate: Dict[str, Any]) -> Dict[str, Any]:
+def _refresh_candidate(
+    research_dir: Path,
+    memory: Dict[str, Any],
+    candidate: Dict[str, Any],
+    client: Any,
+    cache_path: Path,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    if client is None:
+        raise ValueError("refresh=True requires a BRAIN client")
+    result_id = str(candidate.get("result_id") or "").strip()
+    if not result_id:
+        raise ValueError(f"Candidate {candidate.get('candidate_id')} has no result_id to refresh from BRAIN")
+    metrics = client.fetch_result(result_id).as_dict()
+    candidate_id = str(candidate.get("candidate_id") or "")
+    updated = update_candidate_metrics(memory, candidate_id, metrics)
+    save_family_memory(research_dir, memory)
+    refreshed: Dict[str, Any] = {
+        "result_id": result_id,
+        "refreshed_at": utc_now_iso(),
+        "updated_snapshots": updated,
+    }
+    fetch_self = getattr(client, "fetch_self_correlation", None)
+    if callable(fetch_self):
+        try:
+            correlation = fetch_self(result_id)
+        except Exception as exc:  # noqa: BLE001 - the metrics refresh already succeeded; report and continue
+            refreshed["self_correlation_error"] = f"{exc.__class__.__name__}: {exc}"
+        else:
+            cache = load_correlation_cache(cache_path)
+            update_correlation_cache(cache, correlation)
+            save_correlation_cache(cache_path, cache)
+            refreshed["self_correlation_max"] = correlation.max_correlation
+    return dict(candidate, metrics=metrics), refreshed
+
+
+def _build_report(candidate: Dict[str, Any], cache: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
     metrics = candidate.get("metrics", {}) if isinstance(candidate.get("metrics"), dict) else {}
     raw = metrics.get("raw", {}) if isinstance(metrics.get("raw"), dict) else {}
     platform_checks = _platform_checks(raw)
@@ -65,6 +128,11 @@ def _build_report(candidate: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": "No platform validation checks were available in the stored result raw payload.",
             }
 
+    if checks["self_corr"]["status"] in {"pending", "missing", "needs_live_result"}:
+        cached = _self_corr_from_cache(cache or {}, str(candidate.get("result_id") or ""))
+        if cached is not None:
+            checks["self_corr"] = cached
+
     blocking = [
         name for name, check in checks.items()
         if check["status"] in {"fail", "needs_live_result", "missing", "pending"}
@@ -84,6 +152,24 @@ def _build_report(candidate: Dict[str, Any]) -> Dict[str, Any]:
         "metrics": metrics,
         "platform_failed_checks": failed_platform_checks,
         "next_action": _next_action(blocking),
+    }
+
+
+def _self_corr_from_cache(cache: Dict[str, Dict[str, Any]], result_id: str) -> Optional[Dict[str, str]]:
+    """Use the cached BRAIN self-correlation when the stored platform check is still PENDING."""
+    if not result_id:
+        return None
+    platform_max = self_correlation_max(cache, result_id)
+    if platform_max is None:
+        return None
+    status = "fail" if platform_max >= SELF_CORRELATION_THRESHOLD else "pass"
+    return {
+        "status": status,
+        "reason": (
+            f"BRAIN self-correlation max={platform_max:g} vs threshold {SELF_CORRELATION_THRESHOLD:g} "
+            "(from research/state/alpha_correlations.json)"
+        ),
+        "source": "correlation_cache",
     }
 
 
@@ -160,15 +246,6 @@ def _flat_report(report: Dict[str, Any]) -> Dict[str, Any]:
         "overall_status": report.get("overall_status"),
         "blocking_checks": ",".join(report.get("blocking_checks", [])),
     }
-
-
-def _load_json(path: Path) -> Dict[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(f"Missing required file: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"Expected JSON object: {path}")
-    return payload
 
 
 def _append_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:

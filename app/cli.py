@@ -5,11 +5,18 @@ from pathlib import Path
 from typing import List, Optional
 
 from app.api import RateLimiter, build_client
+from app.attribution import build_attribution
 from app.config import Settings
 from app.correlations import fetch_correlations
 from app.logging_utils import configure_logging
 from app.models import AlphaCandidate
-from app.research import PASSED_METRIC_FIELDS, initialize_research_dir, record_passed_alpha, summarize_workflow_state
+from app.research import (
+    PASSED_METRIC_FIELDS,
+    initialize_research_dir,
+    load_family_memory,
+    record_passed_alpha,
+    summarize_workflow_state,
+)
 from app.research_paths import research_paths
 from app.selection import load_passed_alpha_records, run_selection_pipeline
 from app.simulator import SimulateRunner, render_metrics
@@ -50,6 +57,17 @@ def make_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate-candidate", help="Print deterministic validation report from research memory")
     validate.add_argument("--candidate-id", default=None, help="Candidate id to validate. Defaults to global best")
     validate.add_argument("--write-artifact", action="store_true", help="Append validation_reports files. Default prints only")
+    validate.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-fetch the alpha and its self-correlation from BRAIN before judging (needs a live client)",
+    )
+
+    attribute = subparsers.add_parser(
+        "attribute",
+        help="Compare one candidate's metrics against its parent, family best, and global best",
+    )
+    attribute.add_argument("--candidate-id", default=None, help="Candidate id to attribute. Defaults to global best")
 
     research = subparsers.add_parser("research", help="Summarize the current research loop state")
     research.add_argument(
@@ -219,7 +237,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.command == "validate-candidate":
-        report = validate_candidate_from_memory(settings.research_dir, args.candidate_id, persist=args.write_artifact)
+        if args.refresh and (settings.dry_run or settings.client_mode.lower() == "mock"):
+            parser.error("--refresh needs a live BRAIN client; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests")
+        report = validate_candidate_from_memory(
+            settings.research_dir,
+            args.candidate_id,
+            persist=args.write_artifact,
+            refresh=args.refresh,
+            client=client if args.refresh else None,
+        )
+        print(render_metrics_payload(report))
+        return 0
+
+    if args.command == "attribute":
+        paths = research_paths(settings.research_dir)
+        report = build_attribution(
+            load_family_memory(settings.research_dir),
+            args.candidate_id,
+            decisions_path=paths.experiment_decisions,
+            csv_paths=(paths.passed_alphas, paths.failed_alphas),
+        )
         print(render_metrics_payload(report))
         return 0
 

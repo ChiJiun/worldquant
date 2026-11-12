@@ -8,6 +8,7 @@ import csv
 import json
 import math
 
+from app.attribution import candidate_metadata, compare_metrics, find_candidate
 from app.models import utc_now_iso
 from app.research_paths import ensure_research_layout, existing_or_new, research_paths
 
@@ -184,6 +185,41 @@ def _read_csv_rows(path: Path) -> List[Dict[str, Any]]:
         return list(csv.DictReader(handle))
 
 
+def load_family_memory(research_dir: Path) -> Dict[str, Any]:
+    """Read family memory from the current layout, falling back to legacy locations."""
+    return _load_memory(_existing_family_memory_path(research_dir, research_paths(research_dir).family_memory))
+
+
+def save_family_memory(research_dir: Path, memory: Dict[str, Any]) -> Path:
+    paths = ensure_research_layout(research_dir)
+    memory["updated_at"] = utc_now_iso()
+    paths.family_memory.write_text(json.dumps(memory, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return paths.family_memory
+
+
+def update_candidate_metrics(memory: Dict[str, Any], candidate_id: str, metrics: Dict[str, Any]) -> int:
+    """Replace the stored metrics of every snapshot of ``candidate_id`` (recent, family best, global best)."""
+    refreshed_at = utc_now_iso()
+    updated = 0
+
+    def _apply(snapshot: Any) -> None:
+        nonlocal updated
+        if isinstance(snapshot, dict) and snapshot.get("candidate_id") == candidate_id:
+            snapshot["metrics"] = metrics
+            snapshot["refreshed_at"] = refreshed_at
+            updated += 1
+
+    families = memory.get("families", {}) if isinstance(memory.get("families"), dict) else {}
+    for family in families.values():
+        if not isinstance(family, dict):
+            continue
+        for snapshot in family.get("recent_candidates", []) or []:
+            _apply(snapshot)
+        _apply(family.get("best_candidate"))
+    _apply(memory.get("global_best"))
+    return updated
+
+
 def _load_memory(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {"families": {}, "global_best": None, "updated_at": utc_now_iso()}
@@ -218,6 +254,14 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
             improved.append("fitness")
         elif current_fitness < best_fitness:
             worsened.append("fitness")
+    metadata = candidate_metadata(result)
+    parent_id = str(metadata.get("parent_candidate_id") or "").strip()
+    parent = find_candidate(memory, parent_id) if parent_id else None
+    if parent is not None:
+        latest_vs_parent = compare_metrics(result, parent)
+        latest_vs_parent["reference_candidate_id"] = parent.get("candidate_id")
+    else:
+        latest_vs_parent = {"status": "parent_not_found" if parent_id else "no_parent_recorded"}
 
     if checks_failed > 0:
         decision = "fix_validation_failure"
@@ -257,6 +301,9 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any]) -> Dic
         "decision": decision,
         "dominant_bottleneck": bottleneck,
         "latest_vs_family_best": {"improved": improved, "worsened": worsened},
+        "parent_candidate_id": parent_id,
+        "changed_dimension": str(metadata.get("changed_dimension") or ""),
+        "latest_vs_parent": latest_vs_parent,
         "causal_interpretation": _causal_interpretation(bottleneck),
         "next_action": next_action,
         "metrics": metrics,
@@ -308,7 +355,7 @@ def _update_memory(memory: Dict[str, Any], result: Dict[str, Any], decision: Dic
     family["status"] = _family_status(decision, family)
     candidate_snapshot = _candidate_snapshot(result, decision)
     family["recent_candidates"] = (family.get("recent_candidates", []) + [candidate_snapshot])[-20:]
-    lesson = _derive_lesson(result, decision, family.get("recent_candidates", []))
+    lesson = _derive_lesson(result, decision, family.get("recent_candidates", []), memory)
     if lesson:
         family["lessons"] = _append_unique_lesson(family.get("lessons", []), lesson)
         memory["lessons"] = _append_unique_lesson(memory.get("lessons", []), lesson)
@@ -461,19 +508,27 @@ def _candidate_snapshot(result: Dict[str, Any], decision: Dict[str, Any]) -> Dic
         "expression": result.get("expression"),
         "result_id": result.get("result_id"),
         "metrics": result.get("metrics", {}),
+        "metadata": candidate_metadata(result),
         "decision": decision["decision"],
         "dominant_bottleneck": decision["dominant_bottleneck"],
         "recorded_at": utc_now_iso(),
     }
 
 
-def _derive_lesson(result: Dict[str, Any], decision: Dict[str, Any], recent_candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    metadata = result.get("metadata", {}) if isinstance(result.get("metadata"), dict) else {}
+def _derive_lesson(
+    result: Dict[str, Any],
+    decision: Dict[str, Any],
+    recent_candidates: List[Dict[str, Any]],
+    memory: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    metadata = candidate_metadata(result)
     changed_dimension = str(metadata.get("changed_dimension") or "").strip()
     parent_id = str(metadata.get("parent_candidate_id") or "").strip()
     if not changed_dimension or not parent_id:
         return None
     parent = _find_recent_candidate(recent_candidates, parent_id)
+    if not parent and memory is not None:
+        parent = find_candidate(memory, parent_id)
     if not parent:
         return None
     current_metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}

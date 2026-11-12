@@ -223,10 +223,14 @@ Output machine-readable JSON plus a short human summary.
 
 Do not implement this as autonomous formula generation yet.
 
+Already available:
+
+- `python -m app attribute [--candidate-id X]`: parent-vs-child, family-best and global-best metric deltas with a verdict; the same `latest_vs_parent` block is written into every `research/logs/experiment_decisions.jsonl` row.
+- `python -m app validate-candidate [--refresh]`: deterministic validation report; `--refresh` re-fetches the alpha and its self-correlation from BRAIN so PENDING checks resolve.
+- `python -m app fetch-correlations`: caches BRAIN self/prod correlation for the selection gate.
+
 The next engineering milestone is:
 
 1. stabilize live `python -m app simulate`
 2. improve timeout and error classification
-3. add parent-vs-child result attribution
-4. add deterministic validation check runner
-5. add operator-aware one-action planning
+3. add operator-aware one-action planning

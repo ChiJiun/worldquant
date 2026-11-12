@@ -258,3 +258,98 @@ def test_record_passed_alpha_rejects_non_finite_metrics_and_bad_timestamp(tmp_pa
 
     written = record_passed_alpha(research_dir, {**base, "recorded_at": "2026-05-21T08:09:57Z"})
     assert written["recorded_at"] == "2026-05-21T08:09:57Z"
+
+
+def test_research_decision_records_parent_attribution_from_nested_metadata(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A1",
+                "family": "f",
+                "expression": "rank(close)",
+                "result_id": "alpha-1",
+                "metrics": {"fitness": 0.6, "sharpe": 0.9, "turnover": 0.35, "drawdown": 0.14, "raw": {"is": {"checks": []}}},
+            }
+        ],
+        [],
+    )
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A2",
+                "family": "f",
+                "expression": "ts_decay_linear(rank(close), 60)",
+                "result_id": "alpha-2",
+                "metadata": {"metadata": {"parent_candidate_id": "A1", "changed_dimension": "decay_20_to_60"}},
+                "metrics": {"fitness": 0.96, "sharpe": 1.04, "turnover": 0.4, "drawdown": 0.16, "raw": {"is": {"checks": []}}},
+            }
+        ],
+        [],
+    )
+
+    latest = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
+    assert latest["parent_candidate_id"] == "A1"
+    assert latest["changed_dimension"] == "decay_20_to_60"
+    assert latest["latest_vs_parent"]["improved"] == ["sharpe", "fitness"]
+    assert latest["latest_vs_parent"]["worsened"] == ["turnover", "drawdown"]
+    assert latest["latest_vs_parent"]["verdict"] == "improvement_with_trade_off"
+    assert latest["latest_vs_parent"]["reference_candidate_id"] == "A1"
+
+    memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
+    snapshot = memory["families"]["f"]["recent_candidates"][-1]
+    assert snapshot["metadata"] == {"parent_candidate_id": "A1", "changed_dimension": "decay_20_to_60"}
+    assert memory["families"]["f"]["lessons"][-1]["changed_dimension"] == "decay_20_to_60"
+
+
+def test_research_decision_marks_missing_parent(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    record_research_artifacts(
+        research_dir,
+        [
+            {
+                "candidate_id": "A2",
+                "family": "f",
+                "expression": "rank(close)",
+                "result_id": "alpha-2",
+                "metadata": {"parent_candidate_id": "GHOST", "changed_dimension": "x"},
+                "metrics": {"fitness": 0.9},
+            },
+            {
+                "candidate_id": "A3",
+                "family": "f",
+                "expression": "rank(open)",
+                "result_id": "alpha-3",
+                "metrics": {"fitness": 0.9},
+            },
+        ],
+        [],
+    )
+
+    rows = [json.loads(line) for line in paths.experiment_decisions.read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["latest_vs_parent"] == {"status": "parent_not_found"}
+    assert rows[1]["latest_vs_parent"] == {"status": "no_parent_recorded"}
+
+
+def test_update_candidate_metrics_touches_every_snapshot():
+    from app.research import update_candidate_metrics
+
+    snap = {"candidate_id": "A1", "metrics": {"fitness": 0.5}}
+    memory = {
+        "families": {
+            "f": {"best_candidate": dict(snap), "recent_candidates": [dict(snap), {"candidate_id": "A2", "metrics": {}}]},
+        },
+        "global_best": dict(snap),
+    }
+
+    updated = update_candidate_metrics(memory, "A1", {"fitness": 1.5})
+
+    assert updated == 3
+    assert memory["families"]["f"]["best_candidate"]["metrics"] == {"fitness": 1.5}
+    assert memory["families"]["f"]["recent_candidates"][0]["refreshed_at"].endswith("Z")
+    assert memory["families"]["f"]["recent_candidates"][1]["metrics"] == {}
+    assert memory["global_best"]["metrics"] == {"fitness": 1.5}
