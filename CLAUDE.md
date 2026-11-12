@@ -42,7 +42,7 @@ WorldQuant BRAIN alpha simulate / research artifact 工具。Python 負責 deter
 
 - 用 skill `/worldquant-researcher-workflow [mode]`（`.claude/skills/worldquant-researcher-workflow/SKILL.md`）。Codex 版在 `.codex/skills/`，兩份流程要同步；共用的 policy、failure taxonomy、reflection JSON 在 `docs/research-policy.md`。
 - 一輪只送一條 alpha、只改一個 design dimension；`data/candidates.jsonl` 要填 `parent_candidate_id` 與 `changed_dimension`，否則 `vs_parent` 會是 `no_parent_recorded`、recorder 不會推導 family lesson（family best / global best 比較仍會做）。
-- `.codex/.../SKILL.md` 的「Current Best-Family Heuristic」段含一條具體 expression，是舊內容；依上方「安全規則」新內容不要再這樣寫，要不要移除由使用者決定。
+- 特定 family 的研究結論與具體 alpha expression 不放進 skill 或任何會進版控的檔案（`.codex/.../SKILL.md` 原有的「Current Best-Family Heuristic」段已移除）；這類結論屬於 `research/state/family_memory.json` 的 lessons（本機、gitignore）。
 - 研究員 prompt 全文在 `docs/researcher-prompt.md`，調整研究行為改那份，不要複製進 README。
 
 ## 修改程式時

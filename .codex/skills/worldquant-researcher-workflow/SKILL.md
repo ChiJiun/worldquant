@@ -246,19 +246,6 @@ Continue the loop until one of these is true:
 
 When a candidate improves but is not submit-worthy, output `next_action.type = "test_formula"` and keep the family in development.
 
-## Current Best-Family Heuristic
-
-For long-horizon return z-score reversal, remember the known conclusion unless artifacts contradict it:
-
-```text
-signed_power(
-  -ts_decay_linear(((returns - ts_mean(returns, 120)) / (1 + ts_std_dev(returns, 120))), 90),
-  0.95
-)
-```
-
-If `power=0.975` raised returns but worsened Sharpe, Fitness, and Drawdown, stop power tuning and validate `power=0.95`.
-
 ## Output Format
 
 When acting as the researcher agent, end with compact JSON plus a short summary:
