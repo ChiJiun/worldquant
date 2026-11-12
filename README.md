@@ -348,10 +348,10 @@ C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --alpha-id 2rJM0lwJ
 C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --limit 20 --refresh
 ```
 
-- `--kind self|prod|both`：self 是跟自己帳號已提交 alpha 的相關性（BRAIN 提交門檻 0.7），prod 是跟全平台 alpha 的相關性分布。
-- 已快取的 alpha 預設跳過；`--refresh` 強制重抓。`--limit N` 限制這次最多打 N 次 API，方便分批。
-- BRAIN 計算中會回 `Retry-After`，程式會依 `WQ_POLL_INTERVAL_SECONDS` 與 `WQ_MAX_POLL_ATTEMPTS` 等待。
-- 在 `WQ_DRY_RUN=true` 下 mock client 會寫入相關性為 0 的空結果，只適合跑通流程，不要拿去做提交判斷。
+- `--kind self|prod|both`：self 是跟自己帳號已提交 alpha 的相關性（BRAIN 提交門檻 0.7），`select-alphas` 只用這個。prod 是跟全平台 alpha 的相關性分布，目前只存進快取供人工參考，selection 不使用。
+- 已快取（有數值）的 alpha 預設跳過；`--refresh` 強制重抓，提交新 alpha 後記得跑一次。`--limit N` 限制這次最多打 N 次 API（失敗的呼叫也算），方便分批。
+- BRAIN 計算中會回 `Retry-After`，程式會照平台要求等待（不低於 `WQ_POLL_INTERVAL_SECONDS`、上限 60 秒），最多重試 `WQ_MAX_POLL_ATTEMPTS` 次。
+- 在 `WQ_DRY_RUN=true` 或 mock client 下這個指令會直接報錯：mock 寫入的結果會被當成「平台已確認不相關」，讓已提交 gate 失效。只有為了跑通流程時加 `--allow-mock`，此時寫入的是沒有數值的空項目，`select-alphas` 會視為沒有快取，之後 live 執行也會把它重抓。
 
 跑測試：
 
@@ -415,9 +415,9 @@ workflow 會先讀研究記憶，再決定現在應該找新 alpha，還是針�
 
 `python -m app select-alphas` 不是單純排序 passed alpha。它會做三層 gate：
 
-1. **變體內選 best**：兩條 alpha 若 BRAIN self-correlation 快取有彼此的數值，|correlation| >= 0.7 就進同一 cluster；沒有平台數值時退回表達式結構相似度（同 parent、同 core signal/direction、field/operator Jaccard），門檻 0.85。每個 cluster 只保留 quality score 最高者。
+1. **變體內選 best**：兩條 alpha 只要任一訊號過門檻就進同一 cluster：BRAIN self-correlation 快取裡彼此的 |correlation| >= 0.7，或表達式結構相似度（同 parent、同 core signal/direction、field/operator Jaccard）>= 0.85。注意 BRAIN self-correlation 只會列出該帳號已提交的 alpha，兩條尚未提交的候選不會互相出現，所以候選之間的 clustering 實務上多半仍是結構代理在做。每個 cluster 只保留 quality score 最高者。
 2. **經濟意涵檢查**：candidate 的 expression fingerprint 必須和 family/hypothesis 的 core signal 一致；例如 news hypothesis 不應最後變成純 return-reversal。
-3. **已提交相關性檢查**：cluster winner 若有 BRAIN self-correlation 快取，直接用平台回報的 max correlation（>= 0.7 擋下，`replaced_by` 填平台列出的最相關 alpha id）；沒有快取才用結構相似度和 `research/submissions/submitted_alphas.csv` 比對（>= 0.85 擋下）。被擋的 alpha 不進 `outputs/submit_queue.csv`。
+3. **已提交相關性檢查**：cluster winner 同時看兩個訊號，任一過門檻就擋：BRAIN self-correlation 快取回報的帶號 max correlation >= 0.7（`replaced_by` 填平台列出的最相關 alpha id），或與 `research/submissions/submitted_alphas.csv` 的結構相似度 >= 0.85。平台數值優先，但結構比對是快取過舊時的安全網：提交新 alpha 後沒 `--refresh`，表達式一模一樣的候選仍會被擋。gate 用的是帶號值，與 BRAIN 的 SELF_CORRELATION check 一致，所以強負相關不會擋提交（clustering 則用絕對值）。被擋的 alpha 不進 `outputs/submit_queue.csv`。`correlation_report.md` 會印出快取裡最舊的 `fetched_at`，太舊就重抓。
 
 以前版本還有一個「metric proxy」相似度（對 Sharpe/Fitness/Returns 等指標向量算 Pearson），但所有好 alpha 的指標形狀都相近，會把不相關的 alpha 全部黏成一團，已經移除。
 

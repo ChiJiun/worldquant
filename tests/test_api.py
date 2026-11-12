@@ -189,5 +189,24 @@ def test_mock_client_returns_preset_or_empty_correlation():
 
     assert preset.max_correlation == 0.9
     assert preset.records[0]["id"] == "alpha-2"
-    assert empty.max_correlation == 0.0
+    assert empty.max_correlation is None
     assert empty.records == []
+
+
+@pytest.mark.parametrize(
+    ("poll_interval", "retry_after", "expected"),
+    [
+        (5.0, "30", 30.0),  # honour the platform when it asks for longer than our interval
+        (5.0, "2", 5.0),  # never poll faster than the configured interval
+        (5.0, "Wed, 21 Oct 2026 07:28:00 GMT", 5.0),  # unparsable header -> configured interval
+        (5.0, "-3", 5.0),
+        (0.0, "30", 30.0),
+        (0.0, "abc", 1.0),  # no interval configured and no usable header -> one second, never a hot loop
+        (5.0, "600", 60.0),  # capped so a huge Retry-After cannot hang the run
+    ],
+)
+def test_requests_client_retry_delay_respects_platform_and_floor(settings, poll_interval, retry_after, expected):
+    settings.poll_interval_seconds = poll_interval
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+
+    assert client._retry_delay(retry_after) == expected

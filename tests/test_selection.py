@@ -216,7 +216,8 @@ def test_platform_self_correlation_blocks_submission_without_local_submitted_csv
     assert "BRAIN self-correlation" in recommendations
 
 
-def test_platform_self_correlation_below_threshold_overrides_structural_submitted_match(tmp_path):
+def test_structural_duplicate_of_submitted_alpha_is_blocked_even_when_platform_self_correlation_is_low(tmp_path):
+    """A stale/partial platform cache must not let an expression identical to a submitted alpha through."""
     research_dir = tmp_path / "research"
     output_dir = tmp_path / "outputs"
     (research_dir / "logs").mkdir(parents=True)
@@ -243,6 +244,61 @@ def test_platform_self_correlation_below_threshold_overrides_structural_submitte
     )
     _write_cache(
         research_dir,
+        {
+            "alpha-1": {
+                "self": {
+                    "max_correlation": 0.42,
+                    "records": [{"id": "submitted-1", "correlation": 0.42}],
+                    "fetched_at": "2026-05-01T00:00:00Z",
+                }
+            }
+        },
+    )
+
+    report = run_selection_pipeline(research_dir, output_dir)
+
+    assert report["submit_queue_count"] == 0
+    assert report["correlation_cache_oldest_fetched_at"] == "2026-05-01T00:00:00Z"
+    rejected = (output_dir / "rejected_high_corr_alphas.csv").read_text(encoding="utf-8")
+    assert "high_corr_with_submitted_alpha:structural_high" in rejected
+    assert "submitted-1" in rejected
+    rows = list(csv.DictReader((output_dir / "rejected_high_corr_alphas.csv").open(encoding="utf-8", newline="")))
+    # the platform number is still below 0.7, so the platform status stays pass; the structural gate did the blocking
+    assert rows[0]["self_corr_status"] == "pass"
+    recommendations = (output_dir / "final_alpha_recommendations.md").read_text(encoding="utf-8")
+    assert "reason=structural_high (structural proxy)" in recommendations
+    assert "Platform self-correlation fetched_at=2026-05-01T00:00:00Z" in recommendations
+    report_text = (output_dir / "correlation_report.md").read_text(encoding="utf-8")
+    assert "platform_cache_oldest_fetched_at: 2026-05-01T00:00:00Z" in report_text
+
+
+def test_platform_self_correlation_below_threshold_is_reported_when_structure_differs(tmp_path):
+    research_dir = tmp_path / "research"
+    output_dir = tmp_path / "outputs"
+    (research_dir / "logs").mkdir(parents=True)
+    (research_dir / "submissions").mkdir(parents=True)
+    (research_dir / "logs" / "passed_alphas.csv").write_text(
+        "\n".join(
+            [
+                PASSED_HEADER,
+                '2026-05-10T00:00:00Z,A1,price_volume,"rank(returns) + rank(volume / adv20)",alpha-1,1.5,1.3,0.10,0.05,0.20,validate_best_candidate',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (research_dir / "submissions" / "submitted_alphas.csv").write_text(
+        "\n".join(
+            [
+                "alpha_id,candidate_id,family,expression,sharpe,fitness,returns,drawdown,turnover",
+                'submitted-1,S1,news,"rank(ts_backfill(news_max_up_ret, 120))",1.4,1.2,0.09,0.05,0.20',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_cache(
+        research_dir,
         {"alpha-1": {"self": {"max_correlation": 0.42, "records": [{"id": "submitted-1", "correlation": 0.42}]}}},
     )
 
@@ -254,3 +310,34 @@ def test_platform_self_correlation_below_threshold_overrides_structural_submitte
     assert queue[0]["self_corr_status"] == "pass"
     recommendations = (output_dir / "final_alpha_recommendations.md").read_text(encoding="utf-8")
     assert "Best submitted match `submitted-1` score=0.4200, reason=platform_self_corr (BRAIN self-correlation)" in recommendations
+
+
+def test_pairwise_similarity_links_structural_duplicates_despite_low_platform_correlation():
+    from app.selection import AlphaRecord, pairwise_similarity
+
+    def record(alpha_id):
+        return AlphaRecord(
+            alpha_id=alpha_id,
+            candidate_id=alpha_id,
+            expression="rank(returns)",
+            parent_alpha_id="",
+            workflow_type="x",
+            family="pv",
+            core_signal="return_reversal",
+            fields=["returns"],
+            operators=["rank"],
+            lookbacks=[],
+            direction="short",
+            sharpe=1.0,
+            fitness=1.0,
+            returns=0.1,
+            turnover=0.2,
+            drawdown=0.05,
+        )
+
+    left, right = record("alpha-1"), record("alpha-2")
+    cache = {"alpha-1": {"self": {"max_correlation": 0.3, "records": [{"id": "alpha-2", "correlation": 0.3}]}}}
+
+    assert pairwise_similarity(left, right, cache) == (0.95, 0.85, None)
+    cache["alpha-1"]["self"]["records"][0]["correlation"] = -0.8
+    assert pairwise_similarity(left, right, cache) == (0.8, 0.7, 0.8)

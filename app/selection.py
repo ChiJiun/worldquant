@@ -12,7 +12,9 @@ import re
 from app.correlations import (
     has_self_correlation,
     load_correlation_cache,
+    oldest_fetched_at,
     self_correlation_between,
+    self_correlation_fetched_at,
     self_correlation_max,
     top_self_correlated,
 )
@@ -223,6 +225,7 @@ def run_selection_pipeline(
         "platform_correlation_alpha_count": platform_alpha_count,
         "platform_correlation_edge_count": sum(1 for _l, _r, reason in edges if reason.startswith(PLATFORM_REASON)),
         "correlation_cache": str(paths.alpha_correlations),
+        "correlation_cache_oldest_fetched_at": oldest_fetched_at(correlation_cache),
         "outputs": {
             "candidate_alphas": str(candidate_alphas_path),
             "alpha_registry": str(alpha_registry_path),
@@ -366,13 +369,21 @@ def apply_platform_self_correlation_status(record: AlphaRecord, cache: Dict[str,
 def pairwise_similarity(left: AlphaRecord, right: AlphaRecord, cache: Optional[Dict[str, Dict[str, Any]]] = None) -> Tuple[float, float, Optional[float]]:
     """Return (score, threshold, platform_corr) for a pair.
 
-    When BRAIN reports a self-correlation between the two alphas that number wins and the platform
-    threshold applies; otherwise the expression-structure proxy and its stricter threshold are used.
+    The pair is linked when either signal crosses its own threshold: a BRAIN self-correlation between
+    the two alphas (``|corr| >= 0.7``) or the expression-structure proxy (``>= 0.85``). The platform
+    number is preferred when it crosses; the structural proxy is the safety net for a stale or partial
+    cache (BRAIN only lists alphas already submitted, so two unsubmitted candidates rarely appear in each
+    other's self-correlation). Below both thresholds the platform number is reported when available.
     """
     platform = self_correlation_between(cache or {}, left.alpha_id, right.alpha_id)
+    structural = structural_similarity(left, right)
+    if platform is not None and platform >= PLATFORM_CORRELATION_THRESHOLD:
+        return platform, PLATFORM_CORRELATION_THRESHOLD, platform
+    if structural >= CORRELATION_THRESHOLD:
+        return structural, CORRELATION_THRESHOLD, None
     if platform is not None:
         return platform, PLATFORM_CORRELATION_THRESHOLD, platform
-    return structural_similarity(left, right), CORRELATION_THRESHOLD, None
+    return structural, CORRELATION_THRESHOLD, None
 
 
 def detect_correlation_edges(
@@ -512,22 +523,33 @@ def best_submitted_match(
     submitted: List[AlphaRecord],
     cache: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Optional[Tuple[AlphaRecord, float, str]]:
-    """Platform self-correlation beats the structural proxy whenever BRAIN has computed it for this alpha."""
+    """Strongest evidence that ``record`` duplicates a submitted alpha.
+
+    Platform self-correlation (threshold 0.7) and the structural proxy against the local submitted CSV
+    (threshold 0.85) are both evaluated; whichever crosses its threshold wins, platform first. A stale
+    cache therefore cannot let an expression identical to a submitted alpha through. Below both
+    thresholds the platform match is reported when BRAIN covers the alpha, else the best structural one.
+    """
     cache = cache or {}
+    platform_match: Optional[Tuple[AlphaRecord, float, str]] = None
     platform_max = self_correlation_max(cache, record.alpha_id)
     if platform_max is not None:
         top = top_self_correlated(cache, record.alpha_id)
         other_id = str(top.get("alpha_id") or "") if top else ""
         matched = next((item for item in submitted if item.alpha_id == other_id), None) if other_id else None
         counterpart = matched or _platform_submitted_record(other_id or "platform", top or {})
-        return counterpart, platform_max, PLATFORM_REASON
-    best_match: Optional[Tuple[AlphaRecord, float, str]] = None
+        platform_match = (counterpart, platform_max, PLATFORM_REASON)
+    structural_match: Optional[Tuple[AlphaRecord, float, str]] = None
     for submitted_record in submitted:
         structural = structural_similarity(record, submitted_record)
         reason = correlation_reason(record, submitted_record, structural)
-        if best_match is None or structural > best_match[1]:
-            best_match = (submitted_record, structural, reason)
-    return best_match
+        if structural_match is None or structural > structural_match[1]:
+            structural_match = (submitted_record, structural, reason)
+    if platform_match is not None and platform_match[1] >= PLATFORM_CORRELATION_THRESHOLD:
+        return platform_match
+    if structural_match is not None and structural_match[1] >= CORRELATION_THRESHOLD:
+        return structural_match
+    return platform_match or structural_match
 
 
 def _platform_submitted_record(alpha_id: str, record: Dict[str, Any]) -> AlphaRecord:
@@ -638,7 +660,8 @@ def _write_report(
         f"- rejected_high_corr_count: {len(rejected)}",
         f"- submit_queue_count: {len(queue)}",
         f"- platform_self_correlation_alpha_count: {platform_alpha_count} (threshold {PLATFORM_CORRELATION_THRESHOLD:g}; run `python -m app fetch-correlations` to cover more alphas)",
-        f"- platform_correlation_edges: {platform_edge_count}; structural fallback threshold {CORRELATION_THRESHOLD:g}",
+        f"- platform_correlation_edges: {platform_edge_count}; structural threshold {CORRELATION_THRESHOLD:g} (either signal crossing its threshold links a pair)",
+        f"- platform_cache_oldest_fetched_at: {oldest_fetched_at(cache) or 'n/a'} (re-run fetch-correlations --refresh after submitting new alphas)",
         "",
         "## Clusters",
         "",
@@ -714,6 +737,9 @@ def recommendation_block(
         submitted_record, score, reason = match
         source = "BRAIN self-correlation" if reason.startswith(PLATFORM_REASON) else "structural proxy"
         match_text = f"Best submitted match `{submitted_record.alpha_id}` score={score:.4f}, reason={reason} ({source})."
+        fetched_at = self_correlation_fetched_at(cache or {}, record.alpha_id)
+        if fetched_at:
+            match_text += f" Platform self-correlation fetched_at={fetched_at}."
     status_line = f"- status: `{record.status}`"
     if blocked:
         status_line += f" reason=`{record.reject_reason}`"
