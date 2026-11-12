@@ -106,6 +106,62 @@ def record_research_artifacts(research_dir: Path, results: Iterable[Dict[str, An
     _write_best_alphas(paths.best_alphas, memory)
 
 
+PASSED_DECISIONS = {"validate_best_candidate", "promote_candidate"}
+PASSED_METRIC_FIELDS = ("sharpe", "fitness", "returns", "drawdown", "turnover")
+
+
+def record_passed_alpha(research_dir: Path, row: Dict[str, Any], *, allow_duplicate: bool = False) -> Dict[str, Any]:
+    """Append one verified alpha to passed_alphas.csv without hand-editing the CSV.
+
+    This is the supported replacement for ad hoc append scripts: the row is
+    normalized to PASSED_FIELDS, recorded_at defaults to now, decision must be a
+    pass-gate decision, and an existing result_id is rejected unless
+    allow_duplicate is set.
+    """
+    paths = ensure_research_layout(research_dir)
+    normalized = _normalize_passed_row(row)
+    if not allow_duplicate and normalized["result_id"]:
+        for existing in _read_csv_rows(paths.passed_alphas):
+            if str(existing.get("result_id") or "").strip() == normalized["result_id"]:
+                raise ValueError(
+                    f"result_id {normalized['result_id']} already exists in {paths.passed_alphas}; "
+                    "pass allow_duplicate=True to append anyway"
+                )
+    _append_csv(paths.passed_alphas, PASSED_FIELDS, [normalized])
+    return normalized
+
+
+def _normalize_passed_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    expression = str(row.get("expression") or "").strip()
+    if not expression:
+        raise ValueError("expression is required")
+    candidate_id = str(row.get("candidate_id") or "").strip()
+    if not candidate_id:
+        raise ValueError("candidate_id is required")
+    decision = str(row.get("decision") or "validate_best_candidate").strip() or "validate_best_candidate"
+    if decision not in PASSED_DECISIONS:
+        raise ValueError(f"decision must be one of {sorted(PASSED_DECISIONS)}, got {decision!r}")
+    normalized: Dict[str, Any] = {
+        "recorded_at": str(row.get("recorded_at") or "").strip() or utc_now_iso(),
+        "candidate_id": candidate_id,
+        "family": str(row.get("family") or "manual").strip() or "manual",
+        "expression": expression,
+        "result_id": str(row.get("result_id") or "").strip(),
+        "decision": decision,
+    }
+    for name in PASSED_METRIC_FIELDS:
+        value = _float(row.get(name))
+        normalized[name] = "" if value is None else value
+    return normalized
+
+
+def _read_csv_rows(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
 def _load_memory(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {"families": {}, "global_best": None, "updated_at": utc_now_iso()}

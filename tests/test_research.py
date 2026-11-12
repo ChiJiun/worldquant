@@ -1,6 +1,8 @@
 import json
 
-from app.research import initialize_research_dir, record_research_artifacts
+import pytest
+
+from app.research import PASSED_FIELDS, initialize_research_dir, record_passed_alpha, record_research_artifacts
 from app.research_paths import research_paths
 
 
@@ -181,3 +183,57 @@ def test_research_records_one_change_lessons_in_family_memory(tmp_path):
     assert lessons[-1]["changed_dimension"] == "decay_20_to_60"
     assert "fitness 0.6->0.96" in lessons[-1]["summary"]
     assert memory["lessons"][-1]["candidate_id"] == "A2"
+
+
+def test_record_passed_alpha_appends_normalized_row(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+
+    written = record_passed_alpha(
+        research_dir,
+        {
+            "candidate_id": "BLUE_001",
+            "family": "blue_ocean",
+            "expression": "rank(close)",
+            "result_id": "alpha-1",
+            "sharpe": "1.5",
+            "fitness": 1.2,
+            "returns": 0.1,
+            "drawdown": 0.05,
+            "turnover": 0.2,
+        },
+    )
+
+    assert written["decision"] == "validate_best_candidate"
+    assert written["recorded_at"].endswith("Z")
+    assert written["sharpe"] == 1.5
+    lines = paths.passed_alphas.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == ",".join(PASSED_FIELDS)
+    assert len(lines) == 2
+    assert lines[1] == f"{written['recorded_at']},BLUE_001,blue_ocean,rank(close),alpha-1,1.5,1.2,0.1,0.05,0.2,validate_best_candidate"
+
+
+def test_record_passed_alpha_rejects_duplicate_result_id_unless_allowed(tmp_path):
+    research_dir = tmp_path / "research"
+    paths = research_paths(research_dir)
+    row = {"candidate_id": "C1", "family": "f", "expression": "rank(close)", "result_id": "alpha-1"}
+    record_passed_alpha(research_dir, row)
+
+    with pytest.raises(ValueError, match="already exists"):
+        record_passed_alpha(research_dir, row)
+    assert len(paths.passed_alphas.read_text(encoding="utf-8").splitlines()) == 2
+
+    record_passed_alpha(research_dir, row, allow_duplicate=True)
+    assert len(paths.passed_alphas.read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_record_passed_alpha_validates_required_fields_and_decision(tmp_path):
+    research_dir = tmp_path / "research"
+
+    with pytest.raises(ValueError, match="expression is required"):
+        record_passed_alpha(research_dir, {"candidate_id": "C1", "expression": "  "})
+    with pytest.raises(ValueError, match="candidate_id is required"):
+        record_passed_alpha(research_dir, {"expression": "rank(close)"})
+    with pytest.raises(ValueError, match="decision must be one of"):
+        record_passed_alpha(research_dir, {"candidate_id": "C1", "expression": "rank(close)", "decision": "record_failure"})
+    assert not research_paths(research_dir).passed_alphas.exists()

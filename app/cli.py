@@ -8,7 +8,7 @@ from app.api import RateLimiter, build_client
 from app.config import Settings
 from app.logging_utils import configure_logging
 from app.models import AlphaCandidate
-from app.research import initialize_research_dir, summarize_workflow_state
+from app.research import PASSED_METRIC_FIELDS, initialize_research_dir, record_passed_alpha, summarize_workflow_state
 from app.selection import run_selection_pipeline
 from app.simulator import SimulateRunner, render_metrics
 from app.validation import validate_candidate_from_memory
@@ -58,6 +58,34 @@ def make_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("settings", help="Print non-secret effective settings")
+
+    record = subparsers.add_parser(
+        "record-passed-alpha",
+        help="Append one verified alpha to research/logs/passed_alphas.csv without hand-editing the CSV",
+    )
+    record.add_argument("--candidate-id", required=True, help="Candidate id, e.g. BLUE_SYNERGY_001")
+    record.add_argument("--family", required=True, help="Alpha family / hypothesis name")
+    record.add_argument("--expression", required=True, help="BRAIN expression")
+    record.add_argument("--result-id", required=True, help="BRAIN alpha id returned by the platform")
+    record.add_argument("--sharpe", type=float, default=None)
+    record.add_argument("--fitness", type=float, default=None)
+    record.add_argument("--returns", type=float, default=None)
+    record.add_argument("--drawdown", type=float, default=None)
+    record.add_argument("--turnover", type=float, default=None)
+    record.add_argument(
+        "--decision",
+        default="validate_best_candidate",
+        choices=["validate_best_candidate", "promote_candidate"],
+        help="Pass-gate decision stored with the row",
+    )
+    record.add_argument("--recorded-at", default=None, help="ISO-8601 UTC timestamp. Defaults to now")
+    record.add_argument(
+        "--fetch-metrics",
+        action="store_true",
+        help="Fill metrics that were not passed on the command line from BRAIN using --result-id (needs a live client)",
+    )
+    record.add_argument("--allow-duplicate", action="store_true", help="Append even if result_id already exists in the CSV")
+
     select = subparsers.add_parser("select-alphas", help="Build low-correlation best alpha pool and submit queue")
     select.add_argument("--finalize-run", action="store_true", help="Persist a structured final selection state for the next workflow turn")
     select.add_argument("--clear-candidates", action="store_true", help="Clear the candidate input file after final selection succeeds")
@@ -95,6 +123,26 @@ def main(argv: Optional[List[str]] = None) -> int:
             clear_candidates=args.clear_candidates,
         )
         print(render_metrics_payload(report))
+        return 0
+
+    if args.command == "record-passed-alpha":
+        row = {
+            "recorded_at": args.recorded_at,
+            "candidate_id": args.candidate_id,
+            "family": args.family,
+            "expression": args.expression,
+            "result_id": args.result_id,
+            "sharpe": args.sharpe,
+            "fitness": args.fitness,
+            "returns": args.returns,
+            "drawdown": args.drawdown,
+            "turnover": args.turnover,
+            "decision": args.decision,
+        }
+        if args.fetch_metrics:
+            row = merge_fetched_metrics(row, client.fetch_result(args.result_id).as_dict())
+        written = record_passed_alpha(settings.research_dir, row, allow_duplicate=args.allow_duplicate)
+        print(render_metrics_payload(written))
         return 0
 
     if args.command == "research":
@@ -189,6 +237,19 @@ def _apply_simulation_overrides(settings: Settings, args: argparse.Namespace) ->
     for key, value in overrides.items():
         if value is not None:
             setattr(settings, key, value)
+
+
+def merge_fetched_metrics(row: dict, fetched: dict) -> dict:
+    """Fill metrics missing from the CLI row with values fetched from BRAIN.
+
+    Explicit command-line values always win so a researcher can correct a
+    platform number without re-fetching.
+    """
+    merged = dict(row)
+    for name in PASSED_METRIC_FIELDS:
+        if merged.get(name) is None:
+            merged[name] = fetched.get(name)
+    return merged
 
 
 def render_metrics_payload(payload: dict) -> str:

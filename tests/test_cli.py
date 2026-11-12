@@ -2,7 +2,7 @@ from pathlib import Path
 
 import json
 
-from app.cli import _init_data, main
+from app.cli import _init_data, main, merge_fetched_metrics
 
 
 def test_init_data_copies_candidate_example(settings):
@@ -89,3 +89,43 @@ def test_simulate_accepts_per_run_setting_overrides(settings, monkeypatch):
     assert summary["settings"]["lookback"] == 252
     assert summary["settings"]["maxTrade"] == "ON"
     assert summary["settings"]["maxPosition"] == "OFF"
+
+
+def test_record_passed_alpha_cli_appends_row(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    exit_code = main([
+        "record-passed-alpha",
+        "--candidate-id",
+        "BLUE_001",
+        "--family",
+        "blue_ocean",
+        "--expression",
+        "rank(close)",
+        "--result-id",
+        "alpha-1",
+        "--sharpe",
+        "1.5",
+        "--fitness",
+        "1.2",
+    ])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["result_id"] == "alpha-1"
+    assert payload["returns"] == ""
+    text = (Path("research") / "logs" / "passed_alphas.csv").read_text(encoding="utf-8")
+    assert text.count("\n") == 2
+    assert "BLUE_001,blue_ocean,rank(close),alpha-1,1.5,1.2,,,,validate_best_candidate" in text
+
+
+def test_merge_fetched_metrics_keeps_explicit_values():
+    row = {"sharpe": 2.0, "fitness": None, "returns": None, "drawdown": None, "turnover": None}
+    fetched = {"sharpe": 1.0, "fitness": 1.3, "returns": 0.1, "drawdown": 0.04, "turnover": 0.3, "alpha_id": "x"}
+
+    merged = merge_fetched_metrics(row, fetched)
+
+    assert merged["sharpe"] == 2.0
+    assert merged["fitness"] == 1.3
+    assert merged["turnover"] == 0.3
+    assert "alpha_id" not in merged
