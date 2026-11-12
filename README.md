@@ -330,10 +330,12 @@ C:\Users\USER\anaconda3\python.exe -m app record-passed-alpha `
 
 規則：
 
-- `recorded_at` 預設為現在的 UTC 時間，可用 `--recorded-at` 指定。
+- `recorded_at` 預設為現在的 UTC 時間，可用 `--recorded-at` 指定，必須是 ISO-8601 格式。
+- `--result-id` 必填且不可空白，因為這張表以 BRAIN alpha id 判重。
 - `--decision` 只接受 `validate_best_candidate` 或 `promote_candidate`，確保這張表只放通過 pass gate 的 alpha。
 - 同一個 `--result-id` 已存在時會拒絕寫入，除非加 `--allow-duplicate`。
-- 加 `--fetch-metrics` 會用 `--result-id` 從 BRAIN 補齊沒在命令列指定的指標（需要 live client）。
+- 數值欄位必須是有限數字；`nan`、`inf` 或非數字會被拒絕，避免污染 selection 的排序。
+- 加 `--fetch-metrics` 會用 `--result-id` 從 BRAIN 補齊沒在命令列指定的指標；在 `WQ_DRY_RUN=true` 或 mock client 下會直接報錯。
 
 跑測試：
 

@@ -140,6 +140,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             "decision": args.decision,
         }
         if args.fetch_metrics:
+            if settings.dry_run or settings.client_mode.lower() == "mock":
+                parser.error("--fetch-metrics needs a live BRAIN client; set WQ_DRY_RUN=false and WQ_CLIENT_MODE=requests")
             row = merge_fetched_metrics(row, client.fetch_result(args.result_id).as_dict())
         written = record_passed_alpha(settings.research_dir, row, allow_duplicate=args.allow_duplicate)
         print(render_metrics_payload(written))

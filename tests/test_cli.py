@@ -2,6 +2,8 @@ from pathlib import Path
 
 import json
 
+import pytest
+
 from app.cli import _init_data, main, merge_fetched_metrics
 
 
@@ -129,3 +131,25 @@ def test_merge_fetched_metrics_keeps_explicit_values():
     assert merged["fitness"] == 1.3
     assert merged["turnover"] == 0.3
     assert "alpha_id" not in merged
+
+
+def test_record_passed_alpha_cli_refuses_fetch_metrics_in_dry_run(settings, monkeypatch, capsys):
+    monkeypatch.chdir(settings.candidate_file.parent.parent)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([
+            "record-passed-alpha",
+            "--candidate-id",
+            "C1",
+            "--family",
+            "f",
+            "--expression",
+            "rank(close)",
+            "--result-id",
+            "alpha-1",
+            "--fetch-metrics",
+        ])
+
+    assert exc_info.value.code == 2
+    assert "needs a live BRAIN client" in capsys.readouterr().err
+    assert not (Path("research") / "logs" / "passed_alphas.csv").exists()

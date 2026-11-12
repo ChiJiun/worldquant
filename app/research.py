@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import csv
 import json
+import math
 
 from app.models import utc_now_iso
 from app.research_paths import ensure_research_layout, existing_or_new, research_paths
@@ -138,21 +140,41 @@ def _normalize_passed_row(row: Dict[str, Any]) -> Dict[str, Any]:
     candidate_id = str(row.get("candidate_id") or "").strip()
     if not candidate_id:
         raise ValueError("candidate_id is required")
+    result_id = str(row.get("result_id") or "").strip()
+    if not result_id:
+        raise ValueError("result_id is required: passed alphas are deduplicated by the BRAIN alpha id")
     decision = str(row.get("decision") or "validate_best_candidate").strip() or "validate_best_candidate"
     if decision not in PASSED_DECISIONS:
         raise ValueError(f"decision must be one of {sorted(PASSED_DECISIONS)}, got {decision!r}")
     normalized: Dict[str, Any] = {
-        "recorded_at": str(row.get("recorded_at") or "").strip() or utc_now_iso(),
+        "recorded_at": _normalize_recorded_at(row.get("recorded_at")),
         "candidate_id": candidate_id,
         "family": str(row.get("family") or "manual").strip() or "manual",
         "expression": expression,
-        "result_id": str(row.get("result_id") or "").strip(),
+        "result_id": result_id,
         "decision": decision,
     }
     for name in PASSED_METRIC_FIELDS:
-        value = _float(row.get(name))
+        raw_value = row.get(name)
+        value = _float(raw_value)
+        if raw_value not in (None, "") and value is None:
+            raise ValueError(f"{name} must be a number, got {raw_value!r}")
+        if value is not None and not math.isfinite(value):
+            raise ValueError(f"{name} must be a finite number, got {raw_value!r}")
         normalized[name] = "" if value is None else value
     return normalized
+
+
+def _normalize_recorded_at(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return utc_now_iso()
+    probe = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        datetime.fromisoformat(probe)
+    except ValueError as exc:
+        raise ValueError(f"recorded_at must be an ISO-8601 timestamp such as 2026-05-21T08:09:57Z, got {text!r}") from exc
+    return text
 
 
 def _read_csv_rows(path: Path) -> List[Dict[str, Any]]:

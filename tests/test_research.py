@@ -229,11 +229,32 @@ def test_record_passed_alpha_rejects_duplicate_result_id_unless_allowed(tmp_path
 
 def test_record_passed_alpha_validates_required_fields_and_decision(tmp_path):
     research_dir = tmp_path / "research"
+    base = {"candidate_id": "C1", "expression": "rank(close)", "result_id": "alpha-1"}
 
     with pytest.raises(ValueError, match="expression is required"):
-        record_passed_alpha(research_dir, {"candidate_id": "C1", "expression": "  "})
+        record_passed_alpha(research_dir, {**base, "expression": "  "})
     with pytest.raises(ValueError, match="candidate_id is required"):
-        record_passed_alpha(research_dir, {"expression": "rank(close)"})
+        record_passed_alpha(research_dir, {**base, "candidate_id": ""})
+    with pytest.raises(ValueError, match="result_id is required"):
+        record_passed_alpha(research_dir, {**base, "result_id": "   "})
     with pytest.raises(ValueError, match="decision must be one of"):
-        record_passed_alpha(research_dir, {"candidate_id": "C1", "expression": "rank(close)", "decision": "record_failure"})
+        record_passed_alpha(research_dir, {**base, "decision": "record_failure"})
     assert not research_paths(research_dir).passed_alphas.exists()
+
+
+def test_record_passed_alpha_rejects_non_finite_metrics_and_bad_timestamp(tmp_path):
+    research_dir = tmp_path / "research"
+    base = {"candidate_id": "C1", "expression": "rank(close)", "result_id": "alpha-1"}
+
+    with pytest.raises(ValueError, match="sharpe must be a finite number"):
+        record_passed_alpha(research_dir, {**base, "sharpe": float("nan")})
+    with pytest.raises(ValueError, match="fitness must be a finite number"):
+        record_passed_alpha(research_dir, {**base, "fitness": "inf"})
+    with pytest.raises(ValueError, match="turnover must be a number"):
+        record_passed_alpha(research_dir, {**base, "turnover": "abc"})
+    with pytest.raises(ValueError, match="recorded_at must be an ISO-8601 timestamp"):
+        record_passed_alpha(research_dir, {**base, "recorded_at": "yesterday"})
+    assert not research_paths(research_dir).passed_alphas.exists()
+
+    written = record_passed_alpha(research_dir, {**base, "recorded_at": "2026-05-21T08:09:57Z"})
+    assert written["recorded_at"] == "2026-05-21T08:09:57Z"
