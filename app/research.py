@@ -7,11 +7,16 @@ from typing import Any, Dict, Iterable, List, Optional
 import copy
 import csv
 import json
+import logging
 import math
+import os
+import tempfile
 
 from app.attribution import candidate_metadata, compare_metrics, find_candidate
 from app.models import utc_now_iso
 from app.research_paths import ResearchPaths, ensure_research_layout, existing_or_new, research_paths
+
+LOGGER = logging.getLogger(__name__)
 
 FAILURE_TAXONOMY = [
     "turnover_too_high",
@@ -334,8 +339,8 @@ def _decision_from_result(result: Dict[str, Any], memory: Dict[str, Any], paths:
     if parent is not None:
         latest_vs_parent = compare_metrics(result, parent)
         latest_vs_parent["reference_candidate_id"] = parent.get("candidate_id")
-        if parent.get("source"):
-            latest_vs_parent["reference_source"] = parent.get("source")
+        if parent.get("found_in"):
+            latest_vs_parent["reference_found_in"] = parent.get("found_in")
     else:
         latest_vs_parent = {"status": "parent_not_found" if parent_id else "no_parent_recorded"}
 
@@ -717,7 +722,9 @@ def _append_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> No
 
     A CSV written before a column existed (for example ``source``) is rewritten once with the new
     header so the appended rows do not overflow the old one; existing rows get an empty value in the
-    new column. A header with columns this code does not know is left alone and appending follows it.
+    new column. A header with columns this code does not know is left alone and appending follows it;
+    the values of ``fields`` missing from that header are dropped, and a warning names them because
+    a dropped ``source`` means ``select-alphas`` can no longer tell those rows apart from live ones.
     """
     if not rows:
         return
@@ -732,6 +739,15 @@ def _append_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> No
         fieldnames = fields
     else:
         fieldnames = header
+        unknown = [name for name in header if name not in fields]
+        dropped = [name for name in fields if name not in header]
+        LOGGER.warning(
+            "CSV %s has a header this version does not know (unknown columns: %s); appending with that "
+            "header and dropping %s from the new rows",
+            path,
+            ", ".join(repr(name) for name in unknown),
+            ", ".join(repr(name) for name in dropped) or "nothing",
+        )
     with path.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         if header is None:
@@ -747,12 +763,24 @@ def _csv_header(path: Path) -> Optional[List[str]]:
 
 
 def _rewrite_csv_with_fields(path: Path, fields: List[str]) -> None:
+    """Rewrite ``path`` with header ``fields``, keeping every existing row.
+
+    The new file is written next to ``path`` and swapped in with ``os.replace`` so an interrupted
+    rewrite leaves the original log untouched instead of half-written.
+    """
     with path.open("r", encoding="utf-8", newline="") as handle:
         existing = list(csv.DictReader(handle))
-    with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(existing)
+    descriptor, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(existing)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:

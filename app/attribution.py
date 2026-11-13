@@ -98,7 +98,7 @@ def verdict(improved: List[str], worsened: List[str], unchanged: Sequence[str] =
 
 def find_candidate(
     memory: Dict[str, Any],
-    candidate_id: str,
+    candidate_id: Optional[str],
     decisions_path: Optional[Path] = None,
     csv_paths: Sequence[Path] = (),
     *,
@@ -109,11 +109,13 @@ def find_candidate(
     Search order: family memory (recent candidates, family bests, global best), then the decisions log,
     then the passed/failed alpha CSVs. The CSVs matter for alphas that were recorded manually with
     ``record-passed-alpha`` and therefore never went through the recorder. ``result_id`` (the BRAIN
-    alpha id) narrows the search when the same ``candidate_id`` was reused for different alphas.
+    alpha id) narrows the search when the same ``candidate_id`` was reused for different alphas; given
+    without ``candidate_id`` it finds the alpha carrying that id across every family. Snapshots taken
+    from the decisions log or a CSV carry ``found_in`` (that file's path); memory snapshots do not.
     """
-    if not candidate_id:
-        return None
     wanted_result = str(result_id or "").strip()
+    if not candidate_id and not wanted_result:
+        return None
     families = memory.get("families", {}) if isinstance(memory, dict) else {}
     families = families if isinstance(families, dict) else {}
     for family in families.values():
@@ -166,19 +168,21 @@ def families_with_candidate(memory: Dict[str, Any], candidate_id: str) -> List[s
     return names
 
 
-def find_in_alpha_csv(path: Path, candidate_id: str, *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def find_in_alpha_csv(path: Path, candidate_id: Optional[str], *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Latest passed/failed_alphas.csv row for ``candidate_id`` rebuilt as a snapshot with flat metrics.
 
     Rows without a single metric (platform-error rows in ``failed_alphas.csv``) are skipped: they
-    carry nothing to compare against, and an earlier row of the same candidate usually does.
+    carry nothing to compare against, and an earlier row of the same candidate usually does. Without
+    ``candidate_id`` the row is matched on ``result_id`` alone. The snapshot's ``found_in`` is the CSV
+    path; it is not the row's ``source`` column (``live`` / ``mock``), which is not copied.
     """
-    if not candidate_id or not path.exists():
-        return None
     wanted_result = str(result_id or "").strip()
+    if (not candidate_id and not wanted_result) or not path.exists():
+        return None
     found: Optional[Dict[str, Any]] = None
     with path.open("r", encoding="utf-8", newline="") as handle:
         for row in csv.DictReader(handle):
-            if str(row.get("candidate_id") or "").strip() != candidate_id:
+            if candidate_id and str(row.get("candidate_id") or "").strip() != candidate_id:
                 continue
             if wanted_result and str(row.get("result_id") or "").strip() != wanted_result:
                 continue
@@ -186,22 +190,26 @@ def find_in_alpha_csv(path: Path, candidate_id: str, *, result_id: Optional[str]
             if not any(value is not None for value in metrics.values()):
                 continue
             found = {
-                "candidate_id": candidate_id,
+                "candidate_id": str(row.get("candidate_id") or "").strip(),
                 "family": row.get("family"),
                 "expression": row.get("expression"),
                 "result_id": row.get("result_id"),
                 "recorded_at": row.get("recorded_at"),
                 "metrics": metrics,
-                "source": str(path),
+                "found_in": str(path),
             }
     return found
 
 
-def find_in_decisions(path: Path, candidate_id: str, *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """Latest `experiment_decisions.jsonl` row for ``candidate_id`` that carries metrics."""
-    if not candidate_id or not path.exists():
-        return None
+def find_in_decisions(path: Path, candidate_id: Optional[str], *, result_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Latest `experiment_decisions.jsonl` row for ``candidate_id`` that carries metrics.
+
+    Without ``candidate_id`` the row is matched on ``result_id`` alone. The returned row gains
+    ``found_in`` (the log's path); its own ``source`` key (``live`` / ``mock``) is left as recorded.
+    """
     wanted_result = str(result_id or "").strip()
+    if (not candidate_id and not wanted_result) or not path.exists():
+        return None
     found: Optional[Dict[str, Any]] = None
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
@@ -211,11 +219,15 @@ def find_in_decisions(path: Path, candidate_id: str, *, result_id: Optional[str]
             row = json.loads(stripped)
         except json.JSONDecodeError:
             continue
-        if not isinstance(row, dict) or row.get("candidate_id") != candidate_id or not isinstance(row.get("metrics"), dict):
+        if not isinstance(row, dict) or not isinstance(row.get("metrics"), dict):
+            continue
+        if candidate_id and row.get("candidate_id") != candidate_id:
             continue
         if wanted_result and str(row.get("result_id") or "").strip() != wanted_result:
             continue
         found = row
+    if found is not None:
+        found["found_in"] = str(path)
     return found
 
 
@@ -230,16 +242,19 @@ def build_attribution(
     """Compare a candidate with its parent, its family best and the global best.
 
     ``result_id`` picks one alpha when ``candidate_id`` was reused across families; without it the
-    report carries a ``warning`` naming the families and the ``result_id`` that was used.
+    report carries a ``warning`` naming the families and the ``result_id`` that was used. Given
+    alone, ``result_id`` is looked up across every family (then the decisions log and the CSVs), the
+    same way ``validate-candidate --result-id`` does, instead of only against the global best. With
+    neither id the candidate is the global best.
     """
     wanted_result = str(result_id or "").strip()
-    if candidate_id:
+    if candidate_id or wanted_result:
         candidate = find_candidate(memory, candidate_id, decisions_path, csv_paths, result_id=wanted_result)
     else:
-        global_best = memory.get("global_best")
-        candidate = global_best if snapshot_matches(global_best, None, wanted_result) else None
+        candidate = memory.get("global_best")
+        candidate = candidate if isinstance(candidate, dict) else None
     if candidate is None:
-        wanted = candidate_id or "<global_best>"
+        wanted = candidate_id or ("<any candidate>" if wanted_result else "<global_best>")
         if wanted_result:
             wanted += f" (result_id={wanted_result})"
         raise ValueError(f"Candidate not found in research memory: {wanted}")
@@ -261,8 +276,8 @@ def build_attribution(
     if parent is not None:
         vs_parent = compare_metrics(candidate, parent)
         vs_parent["reference_candidate_id"] = parent.get("candidate_id")
-        if parent.get("source"):
-            vs_parent["reference_source"] = parent.get("source")
+        if parent.get("found_in"):
+            vs_parent["reference_found_in"] = parent.get("found_in")
     else:
         vs_parent = {"status": "parent_not_found" if parent_id else "no_parent_recorded"}
 

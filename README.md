@@ -307,7 +307,9 @@ C:\Users\USER\anaconda3\python.exe -m app simulate --expression "rank(close)" --
 C:\Users\USER\anaconda3\python.exe -m app simulate --limit 1
 ```
 
-在 `WQ_DRY_RUN=true` 或 `WQ_CLIENT_MODE=mock` 下，`simulate` 會直接報錯（exit code 2）而不會送出 mock 結果，避免把合成數據寫進真實研究日誌。只有為了跑通流程時加 `--allow-mock`：此時 recorder 會在 `research/logs/experiment_decisions.jsonl` 與 `passed_alphas.csv` / `failed_alphas.csv` 的 `source` 欄標 `mock`（真實結果是 `live`），`outputs/current_run/summary.json` 也會帶 `source`，而 `select-alphas` 會跳過 `source=mock` 的列。舊的 CSV 沒有 `source` 欄，第一次 append 時會補上欄位，舊列留空並視為 live。
+在 `WQ_DRY_RUN=true` 或 `WQ_CLIENT_MODE=mock` 下，`simulate` 會直接報錯（exit code 2）而不會送出 mock 結果，避免把合成數據寫進真實研究日誌。只有為了跑通流程時加 `--allow-mock`：此時 recorder 會在 `research/logs/experiment_decisions.jsonl` 與 `passed_alphas.csv` / `failed_alphas.csv` 的 `source` 欄標 `mock`（真實結果是 `live`），`outputs/current_run/summary.json` 也會帶 `source`，而 `select-alphas` 會跳過 `source=mock` 的列。舊的 CSV 沒有 `source` 欄，第一次 append 時會補上欄位（先寫到同目錄的暫存檔再整個換掉，中途中斷不會留下半檔），舊列留空並視為 live；CSV 的 header 若含程式不認識的欄位，則照既有 header append，新列裡對不上的欄（含 `source`）會被丟掉並印一行 WARNING 到 stderr。
+
+`research/state/family_memory.json` 不是合法 JSON 時，`simulate` 會印 `error: family memory file is corrupt ...` 並以 exit code 1 結束、不會覆蓋那個檔；此時 simulate 的結果已寫進 `outputs/`（`simulate_results.jsonl` 與 `current_run/`），但 research 日誌（`family_memory.json`、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv`）沒有記錄；修好檔案後重跑會再 simulate 一次（live 下是再打一次 BRAIN API）。
 
 策略型 simulation settings 不建議寫在 `.env`。`.env` 只放帳密、API、timeout、路徑等執行環境；Instrument Type、Region、Universe、Language、Decay、Delay、Truncation、Neutralization、Pasteurization、Lookback、Max Trade、Max Position 由 LLM 依策略在每次實驗指定。
 
@@ -371,7 +373,7 @@ C:\Users\USER\anaconda3\python.exe -m app attribute --candidate-id ANALYST_REV_0
 
 輸出包含 `vs_parent` / `vs_family_best` / `vs_global_best` 每個指標的 from/to/delta、`improved` / `worsened` 清單、整體 `verdict`（`net_improvement`、`improvement_with_trade_off`、`trade_off`、`regression_with_trade_off`、`regression`、`unchanged`、`incomparable`）與下一步提示。`unchanged` 是所有可比指標都相同；`incomparable` 是父代連一個可比指標都沒有（例如父代最後一筆是平台錯誤的 error row），此時只有 family / global 比較可用。父代由 candidate 的 `parent_candidate_id` 決定，依序從 family memory、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv` 找（手動用 `record-passed-alpha` 補登的父代只在 CSV；CSV 中沒有任何指標的 error row 會被跳過，改取同 candidate 更早有指標的列）；同一份歸因也會在每次 simulate 後自動寫進 `research/logs/experiment_decisions.jsonl` 每筆成功結果的 `latest_vs_parent`（simulate 失敗的 error row 沒有指標可比，不帶這個欄位）。沒寫 `parent_candidate_id` 的 candidate 會得到 `no_parent_recorded`。
 
-同一個 `candidate_id` 曾在不同 family 重用時，`attribute` 會取 family memory 裡最先找到的那條並在報告加 `warning`（也印到 stderr）；用 `--result-id <alpha id>` 指定要看哪一條。
+同一個 `candidate_id` 曾在不同 family 重用時，`attribute` 會取 family memory 裡最先找到的那條並在報告加 `warning`（也印到 stderr）；用 `--result-id <alpha id>` 指定要看哪一條。只給 `--result-id` 不給 `--candidate-id` 時，會用 alpha id 跨所有 family 搜尋（依序 family memory、`experiment_decisions.jsonl`、`passed_alphas.csv` / `failed_alphas.csv`），與 `validate-candidate --result-id` 一致，不會只比對 global best；找不到時訊息是 `Candidate not found in research memory: <any candidate> (result_id=...)`。父代若是從 `experiment_decisions.jsonl` 或 CSV 找到的，`vs_parent` 會多一個 `reference_found_in` 指出那個檔案路徑（family memory 裡找到的沒有這個欄位）；它和 CSV / decisions 列的 `source` 欄（`live` / `mock`）無關。
 
 驗證 candidate（預設 global best），並在平台 SELF_CORRELATION 還是 PENDING 時改用 `fetch-correlations` 的快取：
 
@@ -382,7 +384,7 @@ C:\Users\USER\anaconda3\python.exe -m app validate-candidate --candidate-id ANAL
 
 `--refresh` 會用 candidate 的 `result_id` 重新從 BRAIN 抓 alpha（PENDING 的 checks 通常會變成結果）、更新 `family_memory.json` 裡**同一個 `result_id`** 的所有快照（同名 candidate 但指向別的 alpha 的快照不會被動到），並順便把它的 self-correlation 寫進 `research/state/alpha_correlations.json`。需要 live client；`WQ_DRY_RUN=true` 下會直接報錯。
 
-同一個 `candidate_id` 曾在不同 family 重用時，報告會多一個 `warning` 說明選到哪個 `result_id`；用 `--result-id <alpha id>` 可以明確指定要驗證哪一條。只給 `--result-id` 不給 `--candidate-id` 時，會用 alpha id 跨所有 family 搜尋，不會被忽略而默默驗證 global best。找不到 candidate、memory 檔不存在、memory 檔不是合法 JSON（訊息會寫 corrupt，不會當成空的覆蓋掉）、live client 的連線或平台錯誤、mock client 的未知 id，都會印出 `error:` 並以 exit code 1 結束，不會噴 traceback。改用快取判定的 self_corr check 會帶 `fetched_at`，太舊就先 `fetch-correlations --refresh`。
+同一個 `candidate_id` 曾在不同 family 重用時，報告會多一個 `warning` 說明選到哪個 `result_id`；用 `--result-id <alpha id>` 可以明確指定要驗證哪一條。只給 `--result-id` 不給 `--candidate-id` 時，會用 alpha id 跨所有 family 搜尋，不會被忽略而默默驗證 global best。找不到 candidate、memory 檔不存在、memory 檔不是合法 JSON（訊息會寫 corrupt，不會當成空的覆蓋掉；若是 `simulate` 遇到，結果已寫進 `outputs/` 但 research 日誌未記錄，修好後重跑會再 simulate 一次）、live client 的連線或平台錯誤、mock client 的未知 id，都會印出 `error:` 並以 exit code 1 結束，不會噴 traceback。改用快取判定的 self_corr check 會帶 `fetched_at`，太舊就先 `fetch-correlations --refresh`。
 
 手動補登一條已驗證的 passed alpha（取代以前散落在根目錄的 append_*.py 腳本）：
 

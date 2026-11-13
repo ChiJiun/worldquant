@@ -22,6 +22,15 @@ $worldquant-researcher-workflow template-governor
 If no mode is provided, infer the mode from research memory and the latest artifacts.
 If the explicit command and the memory state conflict, follow the explicit command unless it would violate a hard stop condition.
 
+Run every command with the interpreter that has this project installed (`.venv\Scripts\python.exe -m app ...` in the main checkout; the PowerShell examples below use the Anaconda interpreter from the README). `python -m app` below means that interpreter.
+
+## Safety
+
+- `.env` holds the user's BRAIN credentials. Never read, print, copy or commit its values; `python -m app settings` shows only `has_username` / `has_password`.
+- `simulate`, `login-check`, `result`, `fetch-correlations`, `validate-candidate --refresh` and `record-passed-alpha --fetch-metrics` talk to the live BRAIN API when `WQ_DRY_RUN=false`. Run them only because the user asked for this workflow to run; never inside tests or as a "quick check".
+- `WQ_DRY_RUN=true` is the program default and what `.env.example` ships with. Under it every command uses `MockBrainClient`, and four calls are refused: `simulate` and `fetch-correlations` without `--allow-mock`, `record-passed-alpha --fetch-metrics`, `validate-candidate --refresh` (the last two have no override). `simulate --allow-mock` still appends to `research/`, but the recorder tags those rows `source=mock` in `experiment_decisions.jsonl` and in the `source` column of `passed_alphas.csv` / `failed_alphas.csv` (real results are `live`; a CSV written before the column existed is upgraded on the next append, old rows stay blank and count as live), and `select-alphas` skips `source=mock` rows and reports `mock_rows_skipped`. The marker also shows as `metrics.raw.mode=mock` / `metrics.alpha_id=mock-...` in `family_memory.json`, `experiment_decisions.jsonl`, `outputs/simulate_results.jsonl` and `outputs/current_run/results.jsonl`; the `result_id` itself is still the first 12 hex chars of the expression's md5. Family memory protects itself only twice: `_is_better_candidate` never accepts a mock snapshot, so a mock never becomes `global_best`; a family `best_candidate` does accept mocks but the first real result replaces it unconditionally; `recent_candidates` has no protection. Before step 5 run `python -m app settings` and confirm `dry_run=False` and `client_mode=requests`; if it says `dry_run=True`, stop and ask the user instead of simulating. For a deliberate dry-run smoke test set `WQ_RESEARCH_DIR`, `WQ_OUTPUT_DIR`, `WQ_CANDIDATE_FILE` and `WQ_LOG_DIR` to a temporary directory as one-shot shell variables (never in `.env`) and pass `--allow-mock`.
+- Do not edit files under `research/state/` or `research/logs/` by hand; the recorder owns them. Hand-maintained files are `research/notes/` and `research/submissions/submitted_alphas.csv` (one row per real submission); manually verified alphas go through `python -m app record-passed-alpha`.
+
 ## Core Rule
 
 Replace the junior researcher behavior, not the backtest system.
@@ -109,7 +118,7 @@ Perform one loop at a time.
    - `changed_dimension`
    - `notes`
 
-5. Run at most one simulation unless the user explicitly asks for a batch. First confirm the client is live: `settings` must show `dry_run=False` and `client_mode=requests`. Under `dry_run=True` `simulate` is refused unless `--allow-mock` is passed; a mock run tags its rows `source=mock` (skipped by `select-alphas`) but still belongs in a temporary `WQ_RESEARCH_DIR`, never the real `research/`. If `settings` shows `dry_run=True`, stop and ask the user.
+5. Run at most one simulation unless the user explicitly asks for a batch. Check the client mode first (see Safety): `settings` must show `dry_run=False` and `client_mode=requests`. Under `dry_run=True` the command is refused unless `--allow-mock` is passed, and a mock run belongs in a temporary `WQ_RESEARCH_DIR` / `WQ_OUTPUT_DIR` / `WQ_CANDIDATE_FILE` / `WQ_LOG_DIR` set as one-shot shell variables, not the real research logs. If `settings` shows `dry_run=True`, stop and ask the user.
 
 ```powershell
 C:\Users\USER\anaconda3\python.exe -m app settings
@@ -181,7 +190,7 @@ If a setting is overridden, include it in `changed_dimension` and `notes` in `da
 
 6. Read new artifacts from `outputs/current_run/` and `research/`.
    Run `python -m app attribute --candidate-id <id>` to get the child-vs-parent metric deltas and verdict instead of eyeballing them; the same block is stored as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`. `incomparable` means the parent has no metrics (an error row), not a neutral change.
-   When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding. Pass `--result-id <alpha id>` to `attribute` or `validate-candidate` when the same `candidate_id` was reused across families (the report warns when that happened).
+   When a candidate's platform checks are still PENDING, run `python -m app validate-candidate --candidate-id <id> --refresh` to re-fetch the alpha and its self-correlation before deciding. Pass `--result-id <alpha id>` to `attribute` or `validate-candidate` when the same `candidate_id` was reused across families (the report warns when that happened and no `--result-id` was given). `attribute --result-id <alpha id>` or `validate-candidate --result-id <alpha id>` alone looks the alpha up across every family instead of only the global best.
 
 7. Reflect with the taxonomy in `docs/research-policy.md` (path relative to the repository root; shared with the Claude Code skill under `.claude/skills/`).
    Decide exactly one next action:
@@ -267,6 +276,5 @@ Use `docs/research-policy.md` (relative to the repository root) for the full pol
 version of this skill lives in `.claude/skills/worldquant-researcher-workflow/SKILL.md`; keep the two in sync when the loop changes.
 
 The PowerShell examples above use the Anaconda interpreter from the README; any interpreter that has this project installed
-works (for example `.venv\Scripts\python.exe`). `simulate` under `WQ_DRY_RUN=true` is refused unless `--allow-mock` is passed,
-and even then its rows are only tagged `source=mock`, not kept out of `research/`; confirm `python -m app settings` shows
-`dry_run=False` before step 5, and run smoke tests against a temporary `WQ_RESEARCH_DIR`.
+works (for example `.venv\Scripts\python.exe`). The refused dry-run commands, the `source=mock` tagging and the one-shot
+environment variables for a smoke test are listed under Safety at the top of this file.

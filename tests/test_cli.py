@@ -379,6 +379,23 @@ def test_attribute_cli_result_id_picks_reused_candidate_and_warns_without_it(set
     assert exit_code == 1
     assert "result_id=alpha-404" in captured.err
 
+    exit_code = main(["attribute", "--result-id", "alpha-a"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["result_id"] == "alpha-a"
+    assert payload["family"] == "a"
+    assert payload["expression"] == "rank(close)"
+    assert "warning" not in payload
+    assert captured.err == ""
+
+    exit_code = main(["attribute", "--result-id", "alpha-404"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "<any candidate> (result_id=alpha-404)" in captured.err
+
 
 def test_validate_candidate_cli_result_id_alone_is_not_ignored(settings, monkeypatch, capsys):
     monkeypatch.chdir(settings.candidate_file.parent.parent)

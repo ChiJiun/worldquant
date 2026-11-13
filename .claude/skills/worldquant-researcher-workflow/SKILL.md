@@ -112,7 +112,7 @@ Perform one loop at a time. The overall workflow stops only when a pass-worthy c
 
 6. **Read the new artifacts** in `outputs/current_run/` and `research/`, then let Python do the arithmetic:
    - `python -m app attribute --candidate-id <id>` gives child-vs-parent, family-best and global-best deltas with a `verdict` and `next_action_hint`. The recorder already stored the same block as `latest_vs_parent` in `research/logs/experiment_decisions.jsonl`. A verdict of `incomparable` means the parent has no metrics at all (an error row), not that the change had no effect.
-   - When platform checks are still PENDING, `python -m app validate-candidate --candidate-id <id> --refresh` re-fetches the alpha and its self-correlation (live client only). Pass `--result-id <alpha id>` to `attribute` or `validate-candidate` when the same `candidate_id` was reused across families; both reports carry a `warning` when that happened and no `--result-id` was given. `validate-candidate --result-id <alpha id>` alone looks the alpha up across every family.
+   - When platform checks are still PENDING, `python -m app validate-candidate --candidate-id <id> --refresh` re-fetches the alpha and its self-correlation (live client only). Pass `--result-id <alpha id>` to `attribute` or `validate-candidate` when the same `candidate_id` was reused across families; both reports carry a `warning` when that happened and no `--result-id` was given. `attribute --result-id <alpha id>` or `validate-candidate --result-id <alpha id>` alone looks the alpha up across every family instead of only the global best.
 
 7. **Reflect** with the taxonomy in `docs/research-policy.md` and decide exactly one next action: `test_formula`, `validate_checks`, `stop_family` or `promote_template`.
 
