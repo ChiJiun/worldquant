@@ -505,12 +505,12 @@ def test_rewrite_csv_with_fields_swaps_in_a_temp_file_and_keeps_the_original_on_
     monkeypatch.setattr(research_module.os, "replace", _fail)
     with pytest.raises(OSError, match="disk full"):
         _rewrite_csv_with_fields(path, ["candidate_id", "decision", "source"])
-    assert path.read_text(encoding="utf-8", newline="") == original
+    assert path.read_bytes().decode("utf-8") == original
     assert sorted(p.name for p in tmp_path.iterdir()) == ["passed_alphas.csv"]
 
     monkeypatch.undo()
     _rewrite_csv_with_fields(path, ["candidate_id", "decision", "source"])
-    assert path.read_text(encoding="utf-8", newline="") == "candidate_id,decision,source\r\nA,x,\r\n"
+    assert path.read_bytes().decode("utf-8") == "candidate_id,decision,source\r\nA,x,\r\n"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["passed_alphas.csv"]
 
 
