@@ -32,7 +32,7 @@ WorldQuant BRAIN alpha simulate / research artifact 工具。Python 負責 deter
 - `app/cli.py`：所有子命令入口；新功能加在這裡並在 `tests/test_cli.py` 加測試。
 - `app/api/clients.py`：`BrainClient` 抽象、`RequestsBrainClient`（live）、`MockBrainClient`（測試）。新增 API 要同時實作兩個 client 並加 abstract method。
 - `app/simulator.py` → `app/research.py`（recorder：family memory、decisions log、passed/failed CSV）。
-- `app/attribution.py`：parent-vs-child / family best / global best 指標歸因；recorder 與 `attribute` 指令共用。父代沒有任何可比指標時 verdict 是 `incomparable`（不是 `unchanged`）；`find_in_alpha_csv` 會跳過沒有指標的 error row。`attribute --result-id` 與 `validate-candidate --result-id` 都能挑同名 `candidate_id` 中的某一條 alpha，沒給時報告帶 `warning`。
+- `app/attribution.py`：parent-vs-child / family best / global best 指標歸因；recorder 與 `attribute` 指令共用。父代沒有任何可比指標時 verdict 是 `incomparable`（不是 `unchanged`）；`find_in_alpha_csv` 會跳過沒有指標的 error row，回傳的 snapshot 用 `found_in` 帶檔案路徑（不是 `source`，那是 CSV 的 live/mock 欄；decisions 列也會補 `found_in`），`vs_parent` / `latest_vs_parent` 對應的欄位是 `reference_found_in`。`attribute --result-id` 與 `validate-candidate --result-id` 都能挑同名 `candidate_id` 中的某一條 alpha，沒給時報告帶 `warning`；只給 `--result-id` 時兩者都跨 family 搜尋（attribute 還會再找 decisions log 與 CSV），找不到的訊息是 `<any candidate> (result_id=...)`。
 - `app/validation.py`：validation report，`--refresh` 只覆寫同一 `result_id` 的快照；只給 `--result-id` 不給 `--candidate-id` 時用 alpha id 跨 family 搜尋。
 - `app/correlations.py` + `app/selection.py`：BRAIN self/prod correlation 快取與 submit queue gate（平台 >= 0.7 或結構 >= 0.85 任一成立就擋）。快取檔 `CACHE_VERSION` 是 2；舊版或損壞的檔載入時當成空的並 log，寫入前改名成 `alpha_correlations.json.v1` / `.corrupt`。
 - `app/research_paths.py`：`research/` 的 layout。舊 flat layout（`research/*.json|csv`）與 `research/old/` 只做讀取 fallback，而且只有三個檔有：`family_memory.json`（`research.py`，`init-research` 會把它複製到新路徑）、`passed_alphas.csv` 與 `submitted_alphas.csv`（`selection.py`）；其他檔案只讀新路徑。
@@ -49,6 +49,6 @@ WorldQuant BRAIN alpha simulate / research artifact 工具。Python 負責 deter
 
 - 改 CLI 參數或輸出欄位時同步更新 README「命令」段與對應 skill 步驟；改 artifact 欄位時同步 `research/schema/research-artifacts.md`。
 - 門檻常數集中：`SELF_CORRELATION_THRESHOLD`（`app/correlations.py`）、`CORRELATION_THRESHOLD`（`app/selection.py`）。
-- 寫入 `passed_alphas.csv` / `failed_alphas.csv` 一律走 `app/research.py` 的 `_append_csv` 與 `PASSED_FIELDS` / `FAILED_FIELDS`（`validation.py` 的 `validation_reports.csv` 有自己的 writer），不要自己開檔寫。`_append_csv` 遇到舊 header 缺欄位時會重寫整檔補欄位（只加欄、不改值），所以新增欄位要放在 `PASSED_FIELDS` 裡。
+- 寫入 `passed_alphas.csv` / `failed_alphas.csv` 一律走 `app/research.py` 的 `_append_csv` 與 `PASSED_FIELDS` / `FAILED_FIELDS`（`validation.py` 的 `validation_reports.csv` 有自己的 writer），不要自己開檔寫。`_append_csv` 遇到舊 header 缺欄位時會重寫整檔補欄位（只加欄、不改值；寫到同目錄暫存檔再 `os.replace`），所以新增欄位要放在 `PASSED_FIELDS` 裡；header 含程式不認識的欄位時照既有 header append、丟掉對不上的欄並 `LOGGER.warning`。
 - `app/research.py` 的 `_load_memory` 遇到不是合法 JSON 的 `family_memory.json` 會丟 `ValueError`（訊息含 corrupt），不再當成空 memory；CLI 用 `CLI_ERRORS` 把 `ValueError`、`KeyError`、`RuntimeError`、`TimeoutError`、`OSError`、requests 例外轉成 `error:` 與 exit code 1。
 - 真實 `research/logs/passed_alphas.csv` 含舊腳本留下的重複 `result_id`，`record-passed-alpha` 只防新增，不會清理既有資料。

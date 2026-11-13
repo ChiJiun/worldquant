@@ -144,7 +144,8 @@ def test_build_attribution_falls_back_to_passed_alphas_csv_for_manual_parent(tmp
     report = build_attribution(memory, "C1", csv_paths=(tmp_path / "missing.csv", passed))
 
     assert report["vs_parent"]["reference_candidate_id"] == "P_MANUAL"
-    assert report["vs_parent"]["reference_source"] == str(passed)
+    assert report["vs_parent"]["reference_found_in"] == str(passed)
+    assert "reference_source" not in report["vs_parent"]
     assert report["vs_parent"]["deltas"]["fitness"]["from"] == 2.6
     assert report["vs_parent"]["improved"] == ["fitness", "turnover"]
     assert report["vs_parent"]["worsened"] == ["sharpe"]
@@ -191,8 +192,46 @@ def test_find_in_alpha_csv_skips_error_rows_without_metrics(tmp_path):
 
     assert found["result_id"] == "alpha-p"
     assert found["metrics"]["fitness"] == 0.8
+    assert found["found_in"] == str(failed)
+    assert "source" not in found
     assert find_in_alpha_csv(failed, "P2") is None
     assert find_in_alpha_csv(failed, "P1", result_id="alpha-x") is None
+
+
+def test_find_in_alpha_csv_and_decisions_match_on_result_id_alone_and_do_not_copy_source(tmp_path):
+    from app.attribution import find_in_alpha_csv, find_in_decisions
+
+    passed = tmp_path / "passed_alphas.csv"
+    passed.write_text(
+        "\n".join(
+            [
+                "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision,source",
+                "2026-05-22T02:31:02Z,A1,f,rank(close),alpha-a,0.9,0.8,0.05,0.1,0.3,validate_best_candidate,live",
+                "2026-05-23T02:31:02Z,B1,g,rank(open),alpha-b,1.9,1.8,0.05,0.1,0.3,validate_best_candidate,mock",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    decisions = tmp_path / "experiment_decisions.jsonl"
+    decisions.write_text(
+        json.dumps({"candidate_id": "B1", "family": "g", "result_id": "alpha-b", "metrics": {"fitness": 1.8}, "source": "mock"}) + "\n",
+        encoding="utf-8",
+    )
+
+    found = find_in_alpha_csv(passed, None, result_id="alpha-b")
+    assert found["candidate_id"] == "B1"
+    assert found["found_in"] == str(passed)
+    assert "source" not in found
+    assert find_in_alpha_csv(passed, None) is None
+    assert find_in_alpha_csv(passed, None, result_id="alpha-404") is None
+
+    row = find_in_decisions(decisions, None, result_id="alpha-b")
+    assert row["candidate_id"] == "B1"
+    assert row["found_in"] == str(decisions)
+    assert row["source"] == "mock"
+    assert find_in_decisions(decisions, None) is None
+    assert find_in_decisions(decisions, "A1", result_id="alpha-b") is None
 
 
 def test_build_attribution_result_id_picks_the_reused_candidate_and_warns_otherwise():
@@ -224,6 +263,40 @@ def test_build_attribution_result_id_picks_the_reused_candidate_and_warns_otherw
 
     with pytest.raises(ValueError, match=r"DUP \(result_id=alpha-404\)"):
         build_attribution(memory, "DUP", result_id="alpha-404")
-    with pytest.raises(ValueError, match=r"<global_best> \(result_id=alpha-a\)"):
-        build_attribution(memory, result_id="alpha-a")
+    report = build_attribution(memory, result_id="alpha-a")
+    assert report["result_id"] == "alpha-a"
+    assert report["family"] == "a"
+    assert "warning" not in report
     assert find_candidate(memory, "DUP", result_id="alpha-b") is second
+
+
+def test_build_attribution_result_id_alone_searches_every_family_not_only_the_global_best(tmp_path):
+    first = _snapshot("A1", family="a", fitness=1.0, sharpe=1.0)
+    second = _snapshot("B1", family="b", fitness=2.0, sharpe=2.0)
+    memory = {
+        "families": {
+            "a": {"best_candidate": first, "recent_candidates": [first]},
+            "b": {"best_candidate": second, "recent_candidates": [second]},
+        },
+        "global_best": second,
+    }
+
+    report = build_attribution(memory, result_id="alpha-A1")
+    assert report["candidate_id"] == "A1"
+    assert report["family"] == "a"
+    assert report["vs_global_best"]["reference_candidate_id"] == "B1"
+    assert "warning" not in report
+
+    with pytest.raises(ValueError, match=r"<any candidate> \(result_id=alpha-404\)"):
+        build_attribution(memory, result_id="alpha-404")
+
+    passed = tmp_path / "passed_alphas.csv"
+    passed.write_text(
+        "recorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision,source\n"
+        "2026-05-22T02:31:02Z,M1,m,rank(close),alpha-manual,0.9,0.8,0.05,0.1,0.3,validate_best_candidate,live\n",
+        encoding="utf-8",
+    )
+    report = build_attribution(memory, result_id="alpha-manual", csv_paths=(passed,))
+    assert report["candidate_id"] == "M1"
+    assert report["family"] == "m"
+    assert report["vs_global_best"]["reference_candidate_id"] == "B1"

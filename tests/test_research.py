@@ -415,7 +415,8 @@ def test_recorder_attributes_parent_that_only_exists_in_passed_alphas_csv(tmp_pa
 
     latest = json.loads(paths.experiment_decisions.read_text(encoding="utf-8").splitlines()[-1])
     assert latest["latest_vs_parent"]["reference_candidate_id"] == "P_MANUAL"
-    assert latest["latest_vs_parent"]["reference_source"] == str(paths.passed_alphas)
+    assert latest["latest_vs_parent"]["reference_found_in"] == str(paths.passed_alphas)
+    assert "reference_source" not in latest["latest_vs_parent"]
     assert latest["latest_vs_parent"]["verdict"] == "net_improvement"
     memory = json.loads(paths.family_memory.read_text(encoding="utf-8"))
     assert memory["families"]["f"]["lessons"][-1]["parent_candidate_id"] == "P_MANUAL"
@@ -465,17 +466,52 @@ def test_recorder_tags_mock_metrics_as_mock_even_when_source_says_live(tmp_path)
         record_research_artifacts(research_dir, [mock], [], source="staging")
 
 
-def test_append_csv_keeps_an_unknown_header_as_is(tmp_path):
+def test_append_csv_keeps_an_unknown_header_as_is_and_warns_about_dropped_columns(tmp_path, caplog):
     from app.research import _append_csv
 
     path = tmp_path / "custom.csv"
     path.write_text("candidate_id,extra,decision\nA,1,x\n", encoding="utf-8")
 
-    _append_csv(path, PASSED_FIELDS, [{"candidate_id": "B", "decision": "y", "source": "live"}])
+    with caplog.at_level("WARNING", logger="app.research"):
+        _append_csv(path, PASSED_FIELDS, [{"candidate_id": "B", "decision": "y", "source": "mock"}])
 
     lines = path.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "candidate_id,extra,decision"
     assert lines[1:] == ["A,1,x", "B,,y"]
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert str(path) in message
+    assert "unknown columns: 'extra'" in message
+    assert "'source'" in message and "'result_id'" in message
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="app.research"):
+        _append_csv(path, ["candidate_id", "extra", "decision"], [{"candidate_id": "C", "extra": "2", "decision": "z"}])
+    assert caplog.records == []
+    assert path.read_text(encoding="utf-8").splitlines()[-1] == "C,2,z"
+
+
+def test_rewrite_csv_with_fields_swaps_in_a_temp_file_and_keeps_the_original_on_failure(tmp_path, monkeypatch):
+    import app.research as research_module
+    from app.research import _rewrite_csv_with_fields
+
+    path = tmp_path / "passed_alphas.csv"
+    original = "candidate_id,decision\r\nA,x\r\n"
+    path.write_text(original, encoding="utf-8", newline="")
+
+    def _fail(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(research_module.os, "replace", _fail)
+    with pytest.raises(OSError, match="disk full"):
+        _rewrite_csv_with_fields(path, ["candidate_id", "decision", "source"])
+    assert path.read_text(encoding="utf-8", newline="") == original
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["passed_alphas.csv"]
+
+    monkeypatch.undo()
+    _rewrite_csv_with_fields(path, ["candidate_id", "decision", "source"])
+    assert path.read_text(encoding="utf-8", newline="") == "candidate_id,decision,source\r\nA,x,\r\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["passed_alphas.csv"]
 
 
 def test_load_family_memory_reports_corrupt_file_instead_of_empty_memory(tmp_path):

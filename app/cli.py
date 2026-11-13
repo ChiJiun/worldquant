@@ -75,7 +75,7 @@ def make_parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--result-id",
         default=None,
-        help="BRAIN alpha id to pick when the same candidate id was reused across families",
+        help="BRAIN alpha id to pick when the same candidate id was reused across families; alone, it is looked up across every family",
     )
     validate.add_argument("--write-artifact", action="store_true", help="Append validation_reports files. Default prints only")
     validate.add_argument(
@@ -92,7 +92,7 @@ def make_parser() -> argparse.ArgumentParser:
     attribute.add_argument(
         "--result-id",
         default=None,
-        help="BRAIN alpha id to pick when the same candidate id was reused across families",
+        help="BRAIN alpha id to pick when the same candidate id was reused across families; alone, it is looked up across every family (memory, decisions log, CSVs)",
     )
 
     research = subparsers.add_parser("research", help="Summarize the current research loop state")
