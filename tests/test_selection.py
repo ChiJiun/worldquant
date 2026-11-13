@@ -343,6 +343,24 @@ def test_pairwise_similarity_links_structural_duplicates_despite_low_platform_co
     assert pairwise_similarity(left, right, cache) == (0.8, 0.7, 0.8)
 
 
+def test_load_passed_alpha_records_ignores_a_utf8_bom(tmp_path):
+    from app.selection import count_mock_alpha_rows, load_passed_alpha_records
+
+    path = tmp_path / "passed_alphas.csv"
+    path.write_bytes(
+        (
+            "\ufeffrecorded_at,candidate_id,family,expression,result_id,sharpe,fitness,returns,drawdown,turnover,decision,source\n"
+            "2026-05-22T02:31:02Z,A1,f,rank(close),alpha-a,1.5,1.2,0.1,0.05,0.3,validate_best_candidate,live\n"
+            "2026-05-23T02:31:02Z,M1,f,rank(open),deadbeef0000,1.5,1.2,0.1,0.05,0.3,validate_best_candidate,mock\n"
+        ).encode("utf-8")
+    )
+
+    records = load_passed_alpha_records(path)
+
+    assert [(record.alpha_id, record.candidate_id) for record in records] == [("alpha-a", "A1")]
+    assert count_mock_alpha_rows(path) == 1
+
+
 def test_selection_skips_mock_rows_and_reports_their_count(tmp_path):
     research_dir = tmp_path / "research"
     output_dir = tmp_path / "outputs"

@@ -103,7 +103,7 @@ Perform one loop at a time. The overall workflow stops only when a pass-worthy c
 
    Strategy settings never go into `.env`; it is for credentials, API paths, timeouts and local paths. Per-run overrides are also available on the CLI (`--decay`, `--delay`, `--truncation`, `--neutralization`, `--universe`, `--region`, `--instrument-type`, `--language`, `--pasteurization`, `--lookback`, `--max-trade`, `--max-position`); whichever you use, record it in `changed_dimension` and `notes`.
 
-5. **Run at most one simulation** unless the user asks for a batch. Check the client mode first (see Safety): under `dry_run=True` the command is refused unless `--allow-mock` is passed, and a mock run belongs in a temporary `WQ_RESEARCH_DIR`, not the real research logs.
+5. **Run at most one simulation** unless the user asks for a batch. Check the client mode first (see Safety): under `dry_run=True` the command is refused unless `--allow-mock` is passed, and a mock run belongs in a temporary `WQ_RESEARCH_DIR` / `WQ_OUTPUT_DIR` / `WQ_CANDIDATE_FILE` / `WQ_LOG_DIR` set as one-shot shell variables, not the real research logs.
 
    ```powershell
    python -m app settings
