@@ -270,6 +270,46 @@ def test_build_attribution_result_id_picks_the_reused_candidate_and_warns_otherw
     assert find_candidate(memory, "DUP", result_id="alpha-b") is second
 
 
+def test_compare_or_self_tells_a_reused_candidate_id_apart_by_result_id():
+    first = _snapshot("DUP", family="a", fitness=1.0, sharpe=1.0)
+    first["result_id"] = "alpha-a"
+    second = _snapshot("DUP", family="b", fitness=2.0, sharpe=2.0)
+    second["result_id"] = "alpha-b"
+    memory = {
+        "families": {
+            "a": {"best_candidate": first, "recent_candidates": [first]},
+            "b": {"best_candidate": second, "recent_candidates": [second]},
+        },
+        "global_best": second,
+    }
+
+    report = build_attribution(memory, "DUP", result_id="alpha-a")
+    assert report["vs_family_best"] == {"status": "is_family_best"}
+    assert report["vs_global_best"]["reference_candidate_id"] == "DUP"
+    assert report["vs_global_best"]["reference_result_id"] == "alpha-b"
+    assert report["vs_global_best"]["deltas"]["fitness"]["from"] == 2.0
+    assert report["vs_global_best"]["deltas"]["fitness"]["to"] == 1.0
+
+    report = build_attribution(memory, result_id="alpha-b")
+    assert report["vs_global_best"] == {"status": "is_global_best"}
+
+    # Without result ids on both sides the candidate id decides, as before.
+    third = _snapshot("C", family="c", fitness=1.0)
+    third["result_id"] = ""
+    best = dict(third, metrics={"fitness": 3.0})
+    del best["result_id"]
+    memory = {"families": {"c": {"best_candidate": best, "recent_candidates": [third]}}, "global_best": best}
+    report = build_attribution(memory, "C")
+    assert report["vs_global_best"] == {"status": "is_global_best"}
+
+    other = _snapshot("D", family="c", fitness=1.0)
+    del other["result_id"]
+    memory["families"]["c"]["recent_candidates"].append(other)
+    report = build_attribution(memory, "D")
+    assert report["vs_global_best"]["reference_candidate_id"] == "C"
+    assert "reference_result_id" not in report["vs_global_best"]
+
+
 def test_build_attribution_result_id_alone_searches_every_family_not_only_the_global_best(tmp_path):
     first = _snapshot("A1", family="a", fitness=1.0, sharpe=1.0)
     second = _snapshot("B1", family="b", fitness=2.0, sharpe=2.0)

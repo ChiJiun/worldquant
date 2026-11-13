@@ -180,7 +180,7 @@ def find_in_alpha_csv(path: Path, candidate_id: Optional[str], *, result_id: Opt
     if (not candidate_id and not wanted_result) or not path.exists():
         return None
     found: Optional[Dict[str, Any]] = None
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             if candidate_id and str(row.get("candidate_id") or "").strip() != candidate_id:
                 continue
@@ -307,11 +307,27 @@ def build_attribution(
 def _compare_or_self(candidate: Dict[str, Any], reference: Any, label: str) -> Dict[str, Any]:
     if not isinstance(reference, dict):
         return {"status": f"no_{label}"}
-    if reference.get("candidate_id") == candidate.get("candidate_id"):
+    if _same_alpha(candidate, reference):
         return {"status": f"is_{label}"}
     comparison = compare_metrics(candidate, reference)
     comparison["reference_candidate_id"] = reference.get("candidate_id")
+    if reference.get("result_id"):
+        comparison["reference_result_id"] = reference.get("result_id")
     return comparison
+
+
+def _same_alpha(candidate: Dict[str, Any], reference: Dict[str, Any]) -> bool:
+    """True when both snapshots describe one alpha.
+
+    When both carry a ``result_id`` (the BRAIN alpha id) that decides, so a ``candidate_id`` reused for
+    a different alpha is compared instead of reported as ``is_global_best``; otherwise the
+    ``candidate_id`` has to match.
+    """
+    candidate_result = str(candidate.get("result_id") or "").strip()
+    reference_result = str(reference.get("result_id") or "").strip()
+    if candidate_result and reference_result:
+        return candidate_result == reference_result
+    return reference.get("candidate_id") == candidate.get("candidate_id")
 
 
 def _hint(verdict_label: str, changed_dimension: str) -> str:

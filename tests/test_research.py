@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 
 import pytest
 
@@ -489,6 +490,66 @@ def test_append_csv_keeps_an_unknown_header_as_is_and_warns_about_dropped_column
         _append_csv(path, ["candidate_id", "extra", "decision"], [{"candidate_id": "C", "extra": "2", "decision": "z"}])
     assert caplog.records == []
     assert path.read_text(encoding="utf-8").splitlines()[-1] == "C,2,z"
+
+
+def test_append_csv_ignores_a_utf8_bom_and_drops_it_on_upgrade(tmp_path, caplog):
+    from app.research import _append_csv, _read_csv_rows
+
+    path = tmp_path / "passed_alphas.csv"
+    legacy_header = ",".join(PASSED_FIELDS[:-1])
+    path.write_bytes(("\ufeff" + legacy_header + "\n2026-05-22T02:31:02Z,OLD,f,rank(close),alpha-old,2.24,2.51,0.1567,0.0549,0.0486,validate_best_candidate\n").encode("utf-8"))
+
+    with caplog.at_level("WARNING", logger="app.research"):
+        _append_csv(path, PASSED_FIELDS, [{"recorded_at": "t", "candidate_id": "NEW", "decision": "y", "source": "live"}])
+
+    assert caplog.records == []
+    raw = path.read_bytes()
+    assert not raw.startswith("\ufeff".encode("utf-8"))
+    rows = _read_csv_rows(path)
+    assert list(rows[0].keys()) == PASSED_FIELDS
+    assert [(row["recorded_at"], row["candidate_id"], row["source"]) for row in rows] == [("2026-05-22T02:31:02Z", "OLD", ""), ("t", "NEW", "live")]
+
+    # A BOM in front of an already complete header needs no rewrite and raises no warning either.
+    complete = tmp_path / "complete.csv"
+    complete.write_bytes(("\ufeff" + ",".join(PASSED_FIELDS) + "\n").encode("utf-8"))
+    with caplog.at_level("WARNING", logger="app.research"):
+        _append_csv(complete, PASSED_FIELDS, [{"candidate_id": "X", "source": "mock"}])
+    assert caplog.records == []
+    assert complete.read_bytes().startswith("\ufeff".encode("utf-8"))
+    assert [row["candidate_id"] for row in _read_csv_rows(complete)] == ["X"]
+
+
+def test_append_csv_does_not_upgrade_a_header_with_a_repeated_column(tmp_path, caplog):
+    from app.research import _append_csv
+
+    path = tmp_path / "dup.csv"
+    path.write_text("candidate_id,candidate_id,decision\nA,A2,x\n", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="app.research"):
+        _append_csv(path, PASSED_FIELDS, [{"candidate_id": "B", "decision": "y", "source": "mock"}])
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines == ["candidate_id,candidate_id,decision", "A,A2,x", "B,B,y"]
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert "duplicated columns: 'candidate_id'" in message
+    assert "unknown columns" not in message
+    assert "'source'" in message
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["dup.csv"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="permission bits are a POSIX concept")
+def test_rewrite_csv_with_fields_keeps_the_original_permission_bits(tmp_path):
+    from app.research import _rewrite_csv_with_fields
+
+    path = tmp_path / "passed_alphas.csv"
+    path.write_text("candidate_id,decision\nA,x\n", encoding="utf-8")
+    os.chmod(path, 0o640)
+
+    _rewrite_csv_with_fields(path, ["candidate_id", "decision", "source"])
+
+    assert os.stat(path).st_mode & 0o777 == 0o640
+    assert path.read_text(encoding="utf-8").splitlines()[0] == "candidate_id,decision,source"
 
 
 def test_rewrite_csv_with_fields_swaps_in_a_temp_file_and_keeps_the_original_on_failure(tmp_path, monkeypatch):

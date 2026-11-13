@@ -387,6 +387,8 @@ def test_attribute_cli_result_id_picks_reused_candidate_and_warns_without_it(set
     assert payload["result_id"] == "alpha-a"
     assert payload["family"] == "a"
     assert payload["expression"] == "rank(close)"
+    assert payload["vs_global_best"]["reference_candidate_id"] == "DUP"
+    assert payload["vs_global_best"]["reference_result_id"] == "alpha-b"
     assert "warning" not in payload
     assert captured.err == ""
 
