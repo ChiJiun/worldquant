@@ -37,6 +37,7 @@ WorldQuant BRAIN alpha simulate / research artifact 工具。Python 負責 deter
 - `app/correlations.py` + `app/selection.py`：BRAIN self/prod correlation 快取與 submit queue gate（平台 >= 0.7 或結構 >= 0.85 任一成立就擋）。快取檔 `CACHE_VERSION` 是 2；舊版或損壞的檔載入時當成空的並 log，寫入前改名成 `alpha_correlations.json.v1` / `.corrupt`。
 - `app/research_paths.py`：`research/` 的 layout。舊 flat layout（`research/*.json|csv`）與 `research/old/` 只做讀取 fallback，而且只有三個檔有：`family_memory.json`（`research.py`，`init-research` 會把它複製到新路徑）、`passed_alphas.csv` 與 `submitted_alphas.csv`（`selection.py`）；其他檔案只讀新路徑。
 - artifact 欄位與 layout：`research/schema/research-artifacts.md`、`research/README.md`。
+- `deploy/vm/run_research_round.sh`：Linux VM 上由 cron + `flock` 呼叫的無人值守 runner，一次跑一輪 headless Claude Code（`--permission-mode dontAsk` 加 allow list，不用 `--dangerously-skip-permissions`）。`python -m app settings` 不是 live 或缺帳密時，preflight 以 exit code 3 拒絕且不啟動 Claude；`logs/agent/STOP` 是暫停開關。改 allow list、preflight 或 `WQ_RUNNER_*` 變數時同步 `deploy/vm/README.md`、README「部署到 Linux VM 無人值守執行」段與 `tests/test_vm_runner.py`（這組測試在 Windows 會 skip，只有 CI 的 ubuntu 與 VM 會跑）。
 
 ## 研究 workflow
 
