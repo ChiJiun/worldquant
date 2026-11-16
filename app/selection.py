@@ -271,7 +271,7 @@ def count_mock_alpha_rows(path: Path) -> int:
     """Rows of a passed/failed alpha CSV tagged ``source=mock`` (rows without the column count as live)."""
     if not path.exists():
         return 0
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return sum(1 for row in csv.DictReader(handle) if is_mock_source(row.get("source")))
 
 
@@ -286,7 +286,7 @@ def load_passed_alpha_records(path: Path, *, include_mock: bool = False) -> List
     if not path.exists():
         return []
     records: List[AlphaRecord] = []
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             if not include_mock and is_mock_source(row.get("source")):
                 continue
@@ -322,7 +322,7 @@ def load_submitted_alpha_records(path: Path) -> List[AlphaRecord]:
     if not path.exists():
         return []
     records: List[AlphaRecord] = []
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             expression = str(row.get("expression") or row.get("regular") or "").strip()
             alpha_id = str(row.get("alpha_id") or row.get("result_id") or row.get("candidate_id") or "").strip()
