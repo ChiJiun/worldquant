@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import shutil
 import tempfile
 
 from app.attribution import candidate_metadata, compare_metrics, find_candidate
@@ -231,7 +232,7 @@ def _normalize_recorded_at(value: Any) -> str:
 def _read_csv_rows(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -722,30 +723,38 @@ def _append_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> No
 
     A CSV written before a column existed (for example ``source``) is rewritten once with the new
     header so the appended rows do not overflow the old one; existing rows get an empty value in the
-    new column. A header with columns this code does not know is left alone and appending follows it;
-    the values of ``fields`` missing from that header are dropped, and a warning names them because
-    a dropped ``source`` means ``select-alphas`` can no longer tell those rows apart from live ones.
+    new column. A UTF-8 BOM in front of the header (a CSV re-saved by Excel) is ignored when reading
+    and dropped by the rewrite. A header with columns this code does not know, or with a column name
+    repeated, is left alone and appending follows it; the values of ``fields`` missing from that header
+    are dropped, and a warning names them because a dropped ``source`` means ``select-alphas`` can no
+    longer tell those rows apart from live ones.
     """
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     header = _csv_header(path)
+    duplicated = sorted({name for name in header or [] if header.count(name) > 1})
     if header is None:
         fieldnames = fields
     elif header == fields:
         fieldnames = fields
-    elif set(header) <= set(fields):
+    elif not duplicated and set(header) <= set(fields):
         _rewrite_csv_with_fields(path, fields)
         fieldnames = fields
     else:
         fieldnames = header
         unknown = [name for name in header if name not in fields]
         dropped = [name for name in fields if name not in header]
+        problems = []
+        if unknown:
+            problems.append("unknown columns: " + ", ".join(repr(name) for name in unknown))
+        if duplicated:
+            problems.append("duplicated columns: " + ", ".join(repr(name) for name in duplicated))
         LOGGER.warning(
-            "CSV %s has a header this version does not know (unknown columns: %s); appending with that "
-            "header and dropping %s from the new rows",
+            "CSV %s has a header this version does not know (%s); appending with that header and "
+            "dropping %s from the new rows",
             path,
-            ", ".join(repr(name) for name in unknown),
+            "; ".join(problems),
             ", ".join(repr(name) for name in dropped) or "nothing",
         )
     with path.open("a", encoding="utf-8", newline="") as handle:
@@ -758,7 +767,7 @@ def _append_csv(path: Path, fields: List[str], rows: List[Dict[str, Any]]) -> No
 def _csv_header(path: Path) -> Optional[List[str]]:
     if not path.exists():
         return None
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return next(csv.reader(handle), None)
 
 
@@ -766,9 +775,10 @@ def _rewrite_csv_with_fields(path: Path, fields: List[str]) -> None:
     """Rewrite ``path`` with header ``fields``, keeping every existing row.
 
     The new file is written next to ``path`` and swapped in with ``os.replace`` so an interrupted
-    rewrite leaves the original log untouched instead of half-written.
+    rewrite leaves the original log untouched instead of half-written; it keeps the original's
+    permission bits (``tempfile.mkstemp`` creates the temporary file as 0600).
     """
-    with path.open("r", encoding="utf-8", newline="") as handle:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
         existing = list(csv.DictReader(handle))
     descriptor, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
     temp_path = Path(temp_name)
@@ -777,6 +787,7 @@ def _rewrite_csv_with_fields(path: Path, fields: List[str]) -> None:
             writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(existing)
+        shutil.copymode(path, temp_path)
         os.replace(temp_path, path)
     except BaseException:
         temp_path.unlink(missing_ok=True)
