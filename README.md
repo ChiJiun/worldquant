@@ -140,13 +140,14 @@ deploy/vm/
 Linux VM 上無人值守執行研究循環用的檔案：
 
 - `deploy/vm/run_research_round.sh`: 跑一輪研究（headless Claude Code 執行 skill 一次），給 cron + `flock` 呼叫。
-- `deploy/vm/README.md`: 安裝、排程、暫停與設定說明。
+- `deploy/vm/tool_guard.py`: runner 掛上的 PreToolUse hook，逐一檢查 Claude 的工具呼叫，不在白名單內的一律擋下。
+- `deploy/vm/README.md`: 安裝、排程、暫停、設定與限制範圍說明。
 
 ```text
 logs/
 ```
 
-程式 log。`logs/agent/` 是 `deploy/vm/run_research_round.sh` 的每輪輸出、`runner.log`、`STOP` 與失敗計數。
+程式 log。`logs/agent/` 是 `deploy/vm/run_research_round.sh` 的每輪輸出（`round-*.json`、`.guard.log`）、自我檢測輸出（`selftest-*`）、`runner.log`、`STOP`、失敗計數與 `guard-verified-<版本>`。
 
 ## 設定
 
@@ -515,9 +516,11 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 `deploy/vm/run_research_round.sh` 每次跑一輪研究：用 `claude -p "/worldquant-researcher-workflow [mode]"` 以 headless 方式執行 skill 一次，由 cron 加 `flock` 定時呼叫。完整步驟、排程範例與設定變數在 `deploy/vm/README.md`。重點：
 
 - 先做 preflight：`python -m app settings` 必須顯示 `dry_run=False`、`client_mode=requests`、`has_username=True`、`has_password=True`，否則以 exit code 3 結束，不會啟動 Claude。
-- Claude 以 `--permission-mode dontAsk` 執行，只放行 `Bash(.venv/bin/python -m app *)`、`Read`、`Glob`、`Grep`、`Edit(./data/candidates.jsonl)`、`Edit(./research/notes/**)`，並拒絕 `Read(./.env)`；不使用 `--dangerously-skip-permissions`。
+- 真正限制 Claude 的是 `deploy/vm/tool_guard.py`（PreToolUse hook）：Bash 只放行單行的 `.venv/bin/python -m app <子命令> ...`（從 repo 根目錄執行，不含引號、管線、`cd`、`cat` 等其他 shell 語法；子命令不含 `record-passed-alpha` 與 `init-data`）；讀檔限 repo 內且不含 `.env`；寫檔只限 `data/candidates.jsonl` 與 `research/notes/**/*.md`；WebFetch、WebSearch、Agent、MCP 與其他未列出的工具一律擋下。
+- Claude Code 自己的權限設定是第二層：`--permission-mode dontAsk` 加 allow list（`Bash(.venv/bin/python -m app *)`、`Edit(./data/candidates.jsonl)`、`Edit(./research/notes/**/*.md)`），不使用 `--dangerously-skip-permissions`。只靠這一層不夠，因為 Claude Code 在任何模式下都不需核准就會執行 `cat`、`ls`、`grep` 這類唯讀指令。
+- 每個 Claude Code 版本第一次執行前，runner 會先做自我檢測：要求 Claude 執行 `echo wq-guard-probe` 與讀 `/etc/hostname`，守門員的 log 顯示兩者都被擋下才繼續；否則寫入 `logs/agent/STOP` 並以 exit code 4 結束。守門員的規則有測試涵蓋，但它在真實 Claude Code 上是否有接上，只靠這個自我檢測在執行的機器上確認。
 - `logs/agent/STOP` 存在時整輪跳過（暫停用）；連續失敗達 `WQ_RUNNER_MAX_FAILURES`（預設 3）輪時 runner 會自己寫入這個檔。
-- 不會提交 alpha；一輪最多一次 simulate，提交仍是人工步驟。
+- 不會提交 alpha（CLI 沒有提交指令）；守門員一輪只放行一次 `simulate`，而且必須帶 `--limit 1`、不可帶 `--allow-mock`、`--expression`、`--input`。提交仍是人工步驟。
 - BRAIN 帳密只放在 VM 上的 `.env`，Claude token 放在 `~/.config/wq-runner/env`，兩者都不進版控。VM 開始跑之後，研究資料以 VM 上的 `research/` 為準。
 
 ## 下一步
@@ -525,7 +528,6 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 已完成：
 
 - VM 無人值守 runner（`deploy/vm/run_research_round.sh`）
-
 - parent-vs-child metric attribution（`python -m app attribute`，並自動寫入 `experiment_decisions.jsonl`）
 - validation check runner（`python -m app validate-candidate --refresh`，含 self-correlation 快取）
 - BRAIN 真實相關性（`python -m app fetch-correlations`）
