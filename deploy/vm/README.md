@@ -8,13 +8,14 @@ Nothing here submits an alpha: the CLI has no submit command. The round ends at 
 
 Two layers. The first one is the one that counts.
 
-**1. `tool_guard.py`, a PreToolUse hook.** According to Claude Code's hook documentation, a PreToolUse hook runs before every tool call, including calls that need no permission and calls made by subagents. The guard blocks the call (exit code 2) unless it is one of these:
+**1. `tool_guard.py`, a PreToolUse hook.** According to Claude Code's hook documentation, a PreToolUse hook runs before every tool call, including calls that need no permission. Subagents do not come into it: the `Agent` tool is removed with `--disallowedTools` and blocked by the guard as well. The guard blocks the call (exit code 2) unless it is one of these:
 
 | Tool | Let through |
 | --- | --- |
 | Bash | Exactly `<python> -m app <subcommand> ...` on one line, run from the repository root, made only of letters, digits, spaces and `_ . , : = @ % + / -`. No quotes, pipes, `;`, `&&`, redirection, variables, `cd`, `cat`, `ls` or any other command. Subcommands: `settings`, `login-check`, `research`, `init-research`, `simulate`, `result`, `attribute`, `validate-candidate`, `fetch-correlations`, `select-alphas`. Not `record-passed-alpha`, not `init-data`. |
-| Bash, `simulate` | Additionally needs `--limit 1`, may not use `--allow-mock`, `--expression` or `--input`, and is let through once per round. |
-| Read | Paths that resolve (symlinks followed) inside the repository, except `.env` and `.env.*` other than `.env.example`. |
+| Bash, options | Each subcommand has a fixed list of options (`SUBCOMMAND_OPTIONS`). Every option must be spelled out in full (argparse would otherwise accept `--lim` for `--limit`) and may appear once (argparse keeps the last of repeated options); only `fetch-correlations --alpha-id` may repeat. Option values and positional arguments must be plain ids, numbers or words: no `/`, no `..`, no leading `-`. Not offered: `--help`, `simulate --input`, `--expression`, `--family`, `--candidate-id`, `--allow-mock`, and `fetch-correlations --allow-mock`. |
+| Bash, `simulate` | Additionally needs `--limit 1`, so one call sends one candidate from `data/candidates.jsonl`, and is let through once per round (the first call creates a marker file atomically; later calls are blocked). |
+| Read | Paths that resolve (symlinks followed) inside the repository, except `.git/` and any file whose name contains `.env` (backups and swap files included) other than `.env.example`. |
 | Edit, Write | `data/candidates.jsonl` and `research/notes/**/*.md` only. |
 | Grep | Needs a `path` inside the repository that is not the repository root, so it cannot sweep the directory that holds `.env`. |
 | Glob | Patterns and paths inside the repository. |
@@ -32,9 +33,11 @@ What this does not cover:
 
 - `python -m app` itself reads `.env` and talks to BRAIN; the agent chooses which allowed subcommands to run and with which arguments.
 - The agent decides what goes into `data/candidates.jsonl`, so the alpha it simulates is its own choice. That is the point of the loop.
-- "One round" is an instruction in the system prompt. What is enforced is one `simulate` per run of the script, `--max-turns` and the wall-clock timeout.
+- "One round" is an instruction in the system prompt. What is enforced is one `simulate --limit 1` call per run of the script (so at most one BRAIN simulation), `--max-turns` and the wall-clock timeout.
 - The Claude token and, through `.env`, the BRAIN credentials are in the environment or files of the same Unix user the agent runs as. The guard keeps the agent's tools away from them; it is not an operating-system sandbox.
-- The guard's rules are covered by tests. Its wiring into a real Claude Code session is checked only by the self-test above, on the machine where the runner runs.
+- The guard's rules are covered by tests. Its wiring into a real Claude Code session is checked only by the self-test above, on the machine where the runner runs. The self-test shows that the hook ran and logged a block; it does not separately prove the blocked `echo` never executed (Claude Code documents exit code 2 as blocking the call).
+- Claude Code documents that `--bare` skips hooks and skills and will become the default for `-p` in a future release. If that happens, the self-test fails (no guard log), the runner writes `STOP` and exits 4: safe, but the loop stays paused until the runner is updated.
+- Do not clone with a token in the remote URL; the guard blocks reads of `.git/`, but the token would still sit on disk.
 
 ## Setup
 
@@ -119,4 +122,4 @@ The four numeric settings must be positive integers; anything else exits 2 befor
 | `4` | The tool guard did not run or did not block; `STOP` is written at once | `STOP` |
 | other | Exit code of `claude` or `timeout` (`124` or `137` mean the round hit `WQ_RUNNER_TIMEOUT`) | yes |
 
-A round also counts as a failure when `claude` exits 0 but its JSON result has `is_error` true or a `subtype` starting with `error`; the runner then exits 1. Codes 2 and 3 do not stop the loop: cron keeps calling the script, and each call logs its reason to `runner.log` and exits (the only silent cases are a state directory that cannot be created and a repository directory that cannot be entered).
+A round also counts as a failure when `claude` exits 0 but its JSON result has `is_error` true or a `subtype` starting with `error`; the runner then exits 1. These two fields come from Claude Code's actual `--output-format json` output, not from its documentation; when they are missing the runner logs `unknown` and goes by the exit code alone. Codes 2 and 3 do not stop the loop: cron keeps calling the script, and each call logs its reason to `runner.log` and exits (the only silent cases are a state directory that cannot be created and a repository directory that cannot be entered).

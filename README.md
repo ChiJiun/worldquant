@@ -516,11 +516,11 @@ C:\Users\USER\anaconda3\python.exe -m app select-alphas --finalize-run --clear-c
 `deploy/vm/run_research_round.sh` 每次跑一輪研究：用 `claude -p "/worldquant-researcher-workflow [mode]"` 以 headless 方式執行 skill 一次，由 cron 加 `flock` 定時呼叫。完整步驟、排程範例與設定變數在 `deploy/vm/README.md`。重點：
 
 - 先做 preflight：`python -m app settings` 必須顯示 `dry_run=False`、`client_mode=requests`、`has_username=True`、`has_password=True`，否則以 exit code 3 結束，不會啟動 Claude。
-- 真正限制 Claude 的是 `deploy/vm/tool_guard.py`（PreToolUse hook）：Bash 只放行單行的 `.venv/bin/python -m app <子命令> ...`（從 repo 根目錄執行，不含引號、管線、`cd`、`cat` 等其他 shell 語法；子命令不含 `record-passed-alpha` 與 `init-data`）；讀檔限 repo 內且不含 `.env`；寫檔只限 `data/candidates.jsonl` 與 `research/notes/**/*.md`；WebFetch、WebSearch、Agent、MCP 與其他未列出的工具一律擋下。
+- 真正限制 Claude 的是 `deploy/vm/tool_guard.py`（PreToolUse hook）：Bash 只放行單行的 `.venv/bin/python -m app <子命令> ...`（從 repo 根目錄執行，不含引號、管線、`cd`、`cat` 等其他 shell 語法；子命令不含 `record-passed-alpha` 與 `init-data`；每個子命令的選項有固定清單，選項名要寫完整、不可重複，值不可含 `/` 或 `..`）；讀檔限 repo 內，不含 `.git/` 與檔名含 `.env` 的檔（`.env.example` 除外）；寫檔只限 `data/candidates.jsonl` 與 `research/notes/**/*.md`；WebFetch、WebSearch、Agent、MCP 與其他未列出的工具一律擋下。
 - Claude Code 自己的權限設定是第二層：`--permission-mode dontAsk` 加 allow list（`Bash(.venv/bin/python -m app *)`、`Edit(./data/candidates.jsonl)`、`Edit(./research/notes/**/*.md)`），不使用 `--dangerously-skip-permissions`。只靠這一層不夠，因為 Claude Code 在任何模式下都不需核准就會執行 `cat`、`ls`、`grep` 這類唯讀指令。
 - 每個 Claude Code 版本第一次執行前，runner 會先做自我檢測：要求 Claude 執行 `echo wq-guard-probe` 與讀 `/etc/hostname`，守門員的 log 顯示兩者都被擋下才繼續；否則寫入 `logs/agent/STOP` 並以 exit code 4 結束。守門員的規則有測試涵蓋，但它在真實 Claude Code 上是否有接上，只靠這個自我檢測在執行的機器上確認。
 - `logs/agent/STOP` 存在時整輪跳過（暫停用）；連續失敗達 `WQ_RUNNER_MAX_FAILURES`（預設 3）輪時 runner 會自己寫入這個檔。
-- 不會提交 alpha（CLI 沒有提交指令）；守門員一輪只放行一次 `simulate`，而且必須帶 `--limit 1`、不可帶 `--allow-mock`、`--expression`、`--input`。提交仍是人工步驟。
+- 不會提交 alpha（CLI 沒有提交指令）；守門員一輪只放行一次 `simulate`，而且必須帶 `--limit 1`，`--allow-mock`、`--expression`、`--input` 不在選項清單裡（縮寫與重複選項也會被擋），所以一輪最多送出 `data/candidates.jsonl` 的一條候選。提交仍是人工步驟。
 - BRAIN 帳密只放在 VM 上的 `.env`，Claude token 放在 `~/.config/wq-runner/env`，兩者都不進版控。VM 開始跑之後，研究資料以 VM 上的 `research/` 為準。
 
 ## 下一步

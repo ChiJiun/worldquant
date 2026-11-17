@@ -25,7 +25,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 SKILL_NAME = "worldquant-researcher-workflow"
 
@@ -53,7 +53,7 @@ ALLOWED_SUBCOMMANDS = frozenset(
 SAFE_COMMAND = re.compile(r"[A-Za-z0-9_.,:=@%+/ -]+")
 
 READ_TOOLS = frozenset({"Read"})
-WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})
+WRITE_TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
 # Bookkeeping tools that touch nothing outside the session.
 HARMLESS_TOOLS = frozenset({"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"})
 
@@ -89,9 +89,13 @@ def _relative_to_repo(path: str, config: GuardConfig, base: str) -> Optional[str
     return relative.replace(os.sep, "/")
 
 
-def _is_env_file(relative: str) -> bool:
-    name = relative.rsplit("/", 1)[-1]
-    return name == ".env" or (name.startswith(".env.") and name != ".env.example")
+def _is_secret_path(relative: str) -> bool:
+    """`.env` and anything named like it (backups, swap files), plus `.git/` (remote URLs may hold tokens)."""
+    parts = relative.split("/")
+    if parts[0] == ".git":
+        return True
+    name = parts[-1]
+    return ".env" in name and name != ".env.example"
 
 
 def _base_dir(payload: Dict[str, Any], config: GuardConfig) -> str:
@@ -105,8 +109,8 @@ def check_read(path: Any, config: GuardConfig, base: str) -> Optional[str]:
     relative = _relative_to_repo(path, config, base)
     if relative is None:
         return "reads are limited to the repository: %s is outside it" % path
-    if _is_env_file(relative):
-        return ".env holds credentials and must not be read"
+    if _is_secret_path(relative):
+        return ".env files and .git/ may hold credentials and must not be read"
     return None
 
 
@@ -154,17 +158,87 @@ def _glob_escapes(pattern: str) -> bool:
     return normalized.startswith(("/", "~")) or ".." in normalized.split("/") or re.match(r"[A-Za-z]:", normalized) is not None
 
 
-def _option_value(tokens: List[str], name: str) -> Optional[str]:
-    for index, token in enumerate(tokens):
-        if token == name:
-            return tokens[index + 1] if index + 1 < len(tokens) else ""
-        if token.startswith(name + "="):
-            return token[len(name) + 1 :]
-    return None
+# Options each subcommand may use, mapped to True when the option takes a value.
+# Names must match exactly: argparse also accepts abbreviations (`--lim`) and
+# keeps the last of repeated options, so anything looser could be bent into a
+# different command than the one checked here. Options left out on purpose:
+# simulate --input/--expression/--family/--candidate-id/--allow-mock and
+# fetch-correlations --allow-mock.
+SUBCOMMAND_OPTIONS = {
+    "settings": {},
+    "login-check": {},
+    "init-research": {},
+    "research": {"--mode": True},
+    "simulate": {
+        "--limit": True,
+        "--current-run": False,
+        "--instrument-type": True,
+        "--region": True,
+        "--universe": True,
+        "--language": True,
+        "--decay": True,
+        "--delay": True,
+        "--truncation": True,
+        "--neutralization": True,
+        "--pasteurization": True,
+        "--lookback": True,
+        "--max-trade": True,
+        "--max-position": True,
+    },
+    "result": {},
+    "attribute": {"--candidate-id": True, "--result-id": True},
+    "validate-candidate": {"--candidate-id": True, "--result-id": True, "--write-artifact": False, "--refresh": False},
+    "fetch-correlations": {"--alpha-id": True, "--kind": True, "--refresh": False, "--limit": True},
+    "select-alphas": {"--finalize-run": False, "--clear-candidates": False},
+}
+# Options argparse collects into a list, so repeating them is meaningful.
+REPEATABLE_OPTIONS = frozenset({("fetch-correlations", "--alpha-id")})
+# Positional arguments each subcommand takes.
+SUBCOMMAND_POSITIONALS = {"result": 1}
+# Option values and positionals: ids, numbers and enum words. No path
+# separators, so nothing can point the CLI at another file or URL path.
+SAFE_VALUE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.,:+-]*")
 
 
-def _has_option(tokens: List[str], name: str) -> bool:
-    return any(token == name or token.startswith(name + "=") for token in tokens)
+def _parse_options(subcommand: str, tokens: List[str]) -> Tuple[Optional[str], Dict[str, str]]:
+    """Check `tokens` against SUBCOMMAND_OPTIONS; return (reason, {option: value})."""
+    known = SUBCOMMAND_OPTIONS[subcommand]
+    values: Dict[str, str] = {}
+    positionals: List[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        index += 1
+        if not token.startswith("-"):
+            positionals.append(token)
+            continue
+        name, has_inline, inline = token.partition("=")
+        if name not in known:
+            return "option %r is not available for %s in an unattended round" % (name, subcommand), {}
+        if name in values and (subcommand, name) not in REPEATABLE_OPTIONS:
+            return "option %s may be given only once" % name, {}
+        if known[name]:
+            if has_inline:
+                value = inline
+            elif index < len(tokens) and not tokens[index].startswith("-"):
+                value = tokens[index]
+                index += 1
+            else:
+                return "option %s needs a value" % name, {}
+            if SAFE_VALUE.fullmatch(value) is None or ".." in value:
+                return "the value of %s must be a plain id, number or word" % name, {}
+            values[name] = value
+        else:
+            if has_inline:
+                return "option %s takes no value" % name, {}
+            values[name] = ""
+    expected = SUBCOMMAND_POSITIONALS.get(subcommand, 0)
+    if len(positionals) != expected:
+        return "%s takes %d positional argument(s), got %d" % (subcommand, expected, len(positionals)), {}
+    for value in positionals:
+        if SAFE_VALUE.fullmatch(value) is None or ".." in value:
+            return "arguments must be plain ids, numbers or words", {}
+    return None, values
 
 
 def check_bash(command: Any, config: GuardConfig, cwd: Optional[str]) -> Optional[str]:
@@ -184,23 +258,26 @@ def check_bash(command: Any, config: GuardConfig, cwd: Optional[str]) -> Optiona
             subcommand,
             ", ".join(sorted(ALLOWED_SUBCOMMANDS)),
         )
+    reason, values = _parse_options(subcommand, options)
+    if reason:
+        return reason
     if subcommand == "simulate":
-        return _check_simulate(options, config)
+        return _check_simulate(values, config)
     return None
 
 
-def _check_simulate(options: List[str], config: GuardConfig) -> Optional[str]:
-    for banned in ("--allow-mock", "--expression", "--input"):
-        if _has_option(options, banned):
-            return "simulate may not use %s in an unattended round; write data/candidates.jsonl instead" % banned
-    if _option_value(options, "--limit") != "1":
-        return "an unattended round simulates one candidate: pass `--limit 1`"
+def _check_simulate(values: Dict[str, str], config: GuardConfig) -> Optional[str]:
+    if values.get("--limit") != "1":
+        return "an unattended round simulates one candidate from data/candidates.jsonl: pass `--limit 1`"
     marker = config.simulate_marker
     if marker:
-        if os.path.exists(marker):
+        # O_EXCL makes "first simulate of the round" atomic even if two hooks run at once.
+        try:
+            handle = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
             return "this round already ran its one simulate; finish the round with the result you have"
-        with open(marker, "w", encoding="utf-8") as handle:
-            handle.write("simulate allowed\n")
+        os.write(handle, b"simulate allowed\n")
+        os.close(handle)
     return None
 
 
@@ -220,14 +297,13 @@ def decide(payload: Any, config: GuardConfig) -> Optional[str]:
     if tool in READ_TOOLS:
         return check_read(tool_input.get("file_path"), config, base)
     if tool in WRITE_TOOLS:
-        return check_write(tool_input.get("file_path") or tool_input.get("notebook_path"), config, base)
+        return check_write(tool_input.get("file_path"), config, base)
     if tool == "Grep":
         return check_grep(tool_input, config, base)
     if tool == "Glob":
         return check_glob(tool_input, config, base)
     if tool == "Skill":
-        name = str(tool_input.get("skill", ""))
-        if name.rsplit(":", 1)[-1] == SKILL_NAME:
+        if tool_input.get("skill") == SKILL_NAME:
             return None
         return "only the %s skill may be loaded" % SKILL_NAME
     if tool in HARMLESS_TOOLS:

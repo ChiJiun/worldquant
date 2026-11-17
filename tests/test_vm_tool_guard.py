@@ -105,8 +105,68 @@ def test_bash_must_run_from_the_repository_root(config, repo: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        # `;` and `&` as separate words: the guard must not rely on them sticking to the subcommand.
+        f"{PY} -m app settings ; cat .env",
+        f"{PY} -m app settings & id",
+        f"{PY} -m app settings\tx",
+        f"{PY} -m app result *",
+        f"{PY} -m app settings extra",
+        f"{PY} -m app settings --help",
+        f"{PY} -m app research -h",
+        f"{PY} -m app research --mode",
+        f"{PY} -m app research --mode auto --mode pass-alpha-search",
+        f"{PY} -m app research --mod auto",
+        f"{PY} -m app result",
+        f"{PY} -m app result a b",
+        f"{PY} -m app result ../users/self",
+        f"{PY} -m app result users/self",
+        f"{PY} -m app attribute --result-id ../x",
+        f"{PY} -m app select-alphas --finalize-run=yes",
+        f"{PY} -m app fetch-correlations --allow-mock",
+        f"{PY} -m app fetch-correlations --allow",
+        f"{PY} -m app validate-candidate -- --refresh",
+    ],
+)
+def test_bash_checks_every_option_and_argument(config, repo: Path, command: str) -> None:
+    assert _decide(config, repo, "Bash", {"command": command}) is not None
+
+
+def test_repeatable_option_is_the_only_one_that_may_repeat(config, repo: Path) -> None:
+    command = f"{PY} -m app fetch-correlations --alpha-id abc --alpha-id def --limit 5"
+    assert _decide(config, repo, "Bash", {"command": command}) is None
+    repeated = f"{PY} -m app fetch-correlations --limit 5 --limit 500"
+    assert _decide(config, repo, "Bash", {"command": repeated}) is not None
+
+
+def test_option_table_covers_exactly_the_allowed_subcommands() -> None:
+    assert set(guard.SUBCOMMAND_OPTIONS) == set(guard.ALLOWED_SUBCOMMANDS)
+
+
+@pytest.mark.parametrize(
     "options",
-    ["", "--current-run", "--limit 5", "--limit", "--limit 1 --allow-mock", "--limit 1 --input other.jsonl", "--limit 1 --expression rank"],
+    [
+        "",
+        "--current-run",
+        "--limit 5",
+        "--limit",
+        "--limit 1 --allow-mock",
+        "--limit 1 --input other.jsonl",
+        "--limit 1 --expression rank",
+        # argparse keeps the last of repeated options and accepts abbreviations.
+        "--limit 1 --limit 50",
+        "--limit 1 --lim 50",
+        "--limit=1 --li=99",
+        "--limit 1 --inp research/notes/batch.md",
+        "--limit 1 --expr close",
+        "--limit 1 --allow-m",
+        "--limit 1 --family x",
+        "--limit 1 --candidate-id x",
+        "--limit 1 --current-run=1",
+        "--limit 1 extra",
+        "--limit=1 --decay -1",
+    ],
 )
 def test_simulate_needs_limit_one_and_no_escape_hatches(config, repo: Path, options: str) -> None:
     command = f"{PY} -m app simulate {options}".strip()
@@ -131,8 +191,11 @@ def test_read_inside_the_repository_is_allowed(config, repo: Path, path: str) ->
     assert _decide(config, repo, "Read", {"file_path": str(repo / path)}) is None
 
 
-@pytest.mark.parametrize("path", [".env", "./.env", "research/.env", ".env.local", ".env.production"])
-def test_read_never_reaches_an_env_file(config, repo: Path, path: str) -> None:
+@pytest.mark.parametrize(
+    "path",
+    [".env", "./.env", "research/.env", ".env.local", ".env.production", ".env~", "..env.swp", ".env.bak", "backup.env", ".git/config", ".git"],
+)
+def test_read_never_reaches_an_env_file_or_git(config, repo: Path, path: str) -> None:
     reason = _decide(config, repo, "Read", {"file_path": path})
     assert reason is not None and ".env" in reason
 
@@ -180,6 +243,11 @@ def test_write_is_limited_to_the_candidate_file_and_markdown_notes(config, repo:
         "deploy/vm/tool_guard.py",
         ".env",
         ".claude/settings.json",
+        ".claude/skills/worldquant-researcher-workflow/SKILL.md",
+        "CLAUDE.md",
+        "README.md",
+        "docs/researcher-prompt.md",
+        "research/README.md",
         "../outside.md",
         "~/.bashrc",
     ],
@@ -187,6 +255,11 @@ def test_write_is_limited_to_the_candidate_file_and_markdown_notes(config, repo:
 def test_write_blocks_every_other_path(config, repo: Path, path: str) -> None:
     assert _decide(config, repo, "Write", {"file_path": path}) is not None
     assert _decide(config, repo, "Edit", {"file_path": path}) is not None
+
+
+def test_notebook_edit_is_not_a_write_tool(config, repo: Path) -> None:
+    payload = {"file_path": "research/notes/a.md", "notebook_path": "x.ipynb"}
+    assert _decide(config, repo, "NotebookEdit", payload) is not None
 
 
 def test_grep_needs_a_path_below_the_repository_root(config, repo: Path) -> None:
@@ -220,6 +293,7 @@ def test_bookkeeping_tools_and_the_workflow_skill_pass(config, repo: Path) -> No
     assert _decide(config, repo, "TodoWrite", {"todos": []}) is None
     assert _decide(config, repo, "Skill", {"skill": "worldquant-researcher-workflow"}) is None
     assert _decide(config, repo, "Skill", {"skill": "other-skill"}) is not None
+    assert _decide(config, repo, "Skill", {"skill": "evil:worldquant-researcher-workflow"}) is not None
     assert _decide(config, repo, "Skill", {}) is not None
 
 
