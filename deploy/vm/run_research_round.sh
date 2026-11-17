@@ -8,12 +8,14 @@
 # Every tool call the agent makes goes through deploy/vm/tool_guard.py (a
 # PreToolUse hook), which is what actually limits it; the permission flags are a
 # second layer. Before the first round on each Claude Code version the runner
-# checks with two harmless probes that the hook really blocks.
+# checks with two harmless probes that the hook really blocks; the check is
+# repeated whenever the guard, this script or the settings it builds change.
 #
 # Exit codes: 0 round finished or skipped by the STOP file, 2 missing tooling or
 # bad configuration, 3 refused by the preflight (not a live, credentialed
 # setup), 4 the tool guard did not run or did not block (STOP is written),
-# otherwise the exit code of `claude` / `timeout`.
+# otherwise the exit code of `claude` / `timeout` (2, 3 and 4 from them are
+# reported as 1 so they cannot be mistaken for the runner's own codes).
 set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -154,6 +156,24 @@ PY
   exit 2
 fi
 
+# The self-test result is only valid for the exact hook wiring it saw: the guard,
+# this script (the flags run_claude passes) and the settings JSON.
+if ! guard_digest="$(
+  "$PYTHON" - "$settings_json" "$GUARD" "$REPO_DIR/deploy/vm/run_research_round.sh" <<'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256(sys.argv[1].encode("utf-8"))
+for path in sys.argv[2:]:
+    with open(path, "rb") as handle:
+        digest.update(b"\0" + handle.read())
+print(digest.hexdigest()[:12])
+PY
+)"; then
+  log "error: could not hash the tool guard and runner"
+  exit 2
+fi
+
 export WQ_GUARD_REPO="$REPO_DIR"
 export WQ_GUARD_PYTHON="$PYTHON"
 # A simulate polls BRAIN for up to ten minutes; the Bash tool's default limit is two.
@@ -190,6 +210,16 @@ stop_loop() {
   log "stop: wrote $STOP_FILE ($1)"
 }
 
+# runner_exit <code>: exit code of claude / timeout as the runner reports it.
+# 2, 3 and 4 are the runner's own codes (configuration, preflight, guard), so a
+# claude that exits with one of them is reported as an ordinary failure, 1.
+runner_exit() {
+  case "$1" in
+    2 | 3 | 4) echo 1 ;;
+    *) echo "$1" ;;
+  esac
+}
+
 count_lines() {
   if [ -f "$1" ]; then grep -c "$2" "$1"; else echo 0; fi
 }
@@ -211,11 +241,11 @@ record_failure() {
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
-# Self-check, once per Claude Code version: ask for two harmless calls the guard
-# must block. If the hook is not wired (a changed flag, a new release), nothing
-# sensitive was touched and the loop stops here.
+# Self-check, once per Claude Code version and guard digest: ask for two harmless
+# calls the guard must block. If the hook is not wired (a changed flag, a new
+# release, an edited guard), nothing sensitive was touched and the loop stops here.
 claude_version="$(printf '%s' "$claude_version_line" | tr -c 'A-Za-z0-9._-' '_')"
-verified="$STATE_DIR/guard-verified-${claude_version:-unknown}"
+verified="$STATE_DIR/guard-verified-${claude_version:-unknown}-$guard_digest"
 if [ ! -e "$verified" ]; then
   probe_out="$STATE_DIR/selftest-$stamp.json"
   export WQ_GUARD_LOG="$STATE_DIR/selftest-$stamp.guard.log"
@@ -237,7 +267,7 @@ if [ ! -e "$verified" ]; then
     # Claude never got as far as a tool call (not logged in, network, timeout):
     # an ordinary failure, not evidence about the guard.
     record_failure "selftest $stamp: claude exit=$probe_status before any tool call (stderr: $probe_out.err)"
-    exit "$probe_status"
+    exit "$(runner_exit "$probe_status")"
   else
     stop_loop "tool guard self-test failed at $stamp on Claude Code '$claude_version' (claude exit $probe_status, blocked Bash=$bash_denied Read=$read_denied); see $probe_out and $WQ_GUARD_LOG, fix the cause, then delete this file"
     exit 4
@@ -253,8 +283,9 @@ rules="This is an unattended, scheduled run. Nobody can answer questions, so nev
 if you cannot proceed, stop and say why in your final message. \
 Run exactly one round of the workflow. A hook checks every tool call and blocks anything outside these rules: \
 the only shell command is '$PYTHON -m app <subcommand> ...' on one line from the repository root, with no quotes, pipes, cd or other shell syntax; \
-record-passed-alpha and init-data are not available; simulate runs once per round and needs '--limit 1'. \
-Read only inside the repository and never .env. Give Grep a subdirectory or file as path, not the repository root. \
+record-passed-alpha and init-data are not available; simulate runs once per round and needs '--limit 1'; \
+fetch-correlations needs '--limit N' with N from 1 to 20. \
+Read only inside the repository and never .env. Give Grep a subdirectory or file as path, not the repository root, and no {} alternatives in Glob or Grep patterns. \
 The only files you may write are data/candidates.jsonl and Markdown files directly in research/notes/ (name made of letters, digits, _ and -, ending in .md; not CLAUDE.md). \
 Never submit an alpha to BRAIN. \
 End with a short summary: mode, candidate id, verdict, next action."
@@ -325,4 +356,4 @@ for kind in round selftest; do
   done
 done
 
-exit "$status"
+exit "$(runner_exit "$status")"

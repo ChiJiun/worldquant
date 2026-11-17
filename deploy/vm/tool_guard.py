@@ -153,7 +153,7 @@ def check_grep(tool_input: Dict[str, Any], config: GuardConfig, base: str) -> Op
         return "Grep may not search the repository root (it holds .env); pass a subdirectory or a file"
     glob = tool_input.get("glob")
     if isinstance(glob, str) and _glob_escapes(glob):
-        return "search patterns must stay inside the repository"
+        return "search patterns must stay inside the repository and may not use {} alternatives"
     return None
 
 
@@ -165,12 +165,19 @@ def check_glob(tool_input: Dict[str, Any], config: GuardConfig, base: str) -> Op
             return "Glob is limited to the repository"
     pattern = tool_input.get("pattern")
     if not isinstance(pattern, str) or _glob_escapes(pattern):
-        return "search patterns must stay inside the repository"
+        return "search patterns must stay inside the repository and may not use {} alternatives"
     return None
 
 
 def _glob_escapes(pattern: str) -> bool:
+    """True when a Glob/Grep pattern could reach outside the directory it is applied to.
+
+    Braces are refused outright: `{..,x}/*` or `{/etc,x}/*` expand to `..` or an
+    absolute path only after this check has looked at the literal text.
+    """
     normalized = pattern.replace("\\", "/")
+    if "{" in normalized or "}" in normalized:
+        return True
     return normalized.startswith(("/", "~")) or ".." in normalized.split("/") or re.match(r"[A-Za-z]:", normalized) is not None
 
 
@@ -209,6 +216,10 @@ SUBCOMMAND_OPTIONS = {
 }
 # Options argparse collects into a list, so repeating them is meaningful.
 REPEATABLE_OPTIONS = frozenset({("fetch-correlations", "--alpha-id")})
+# fetch-correlations calls BRAIN once per alpha (twice with --kind both) unless
+# the alpha is already cached; without --limit it walks every passed alpha. An
+# unattended round must cap it.
+FETCH_CORRELATIONS_MAX_LIMIT = 20
 # Positional arguments each subcommand takes.
 SUBCOMMAND_POSITIONALS = {"result": 1}
 # Option values and positionals: ids, numbers and enum words. No path
@@ -279,6 +290,15 @@ def check_bash(command: Any, config: GuardConfig, cwd: Optional[str]) -> Optiona
         return reason
     if subcommand == "simulate":
         return _check_simulate(values, config)
+    if subcommand == "fetch-correlations":
+        return _check_fetch_correlations(values)
+    return None
+
+
+def _check_fetch_correlations(values: Dict[str, str]) -> Optional[str]:
+    limit = values.get("--limit", "")
+    if re.fullmatch(r"[0-9]+", limit) is None or not 1 <= int(limit) <= FETCH_CORRELATIONS_MAX_LIMIT:
+        return "an unattended round must cap BRAIN calls: pass `--limit N` with N from 1 to %d" % FETCH_CORRELATIONS_MAX_LIMIT
     return None
 
 
