@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -65,15 +66,15 @@ selftest = prompt.startswith("Tool permission self-test")
 mode = os.environ.get("FAKE_CLAUDE_SELFTEST" if selftest else "FAKE_CLAUDE_ROUND", "ok")
 time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
 
-if mode == "crash":
+if mode in ("crash", "crash4"):
     sys.stderr.write("not logged in\n")
-    sys.exit(1)
+    sys.exit(4 if mode == "crash4" else 1)
 if selftest and mode in ("ok", "simulate"):
     tool_call("Bash", {"command": "echo wq-guard-probe"})
     tool_call("Read", {"file_path": "/etc/hostname"})
     if mode == "simulate":
         tool_call("Bash", {"command": python + " -m app simulate --limit 1"})
-elif mode in ("ok", "exit1", "error-json"):
+elif mode in ("ok", "exit1", "exit3", "error-json"):
     tool_call("Read", {"file_path": "README.md"})
 elif mode == "simulate-twice":
     for _ in range(2):
@@ -84,7 +85,7 @@ result = {"result": "ok", "subtype": "success", "is_error": False, "num_turns": 
 if mode in ("error-json", "no-hook-exit1"):
     result.update({"subtype": "error_max_turns", "is_error": True})
 print(json.dumps(result))
-sys.exit(1 if mode in ("exit1", "no-hook-exit1") else 0)
+sys.exit({"exit1": 1, "no-hook-exit1": 1, "exit3": 3}.get(mode, 0))
 '''
 
 
@@ -213,6 +214,7 @@ def test_first_run_self_tests_the_guard_then_runs_one_restricted_round(sandbox: 
 
     rules = argv[argv.index("--append-system-prompt") + 1]
     assert "unattended" in rules and "--limit 1" in rules and "Never submit" in rules
+    assert "fetch-correlations needs '--limit N' with N from 1 to 20" in rules
 
     rounds = sorted(sandbox.state.glob("round-*.json"))
     assert len(rounds) == 1
@@ -232,6 +234,32 @@ def test_self_test_runs_once_per_claude_version(sandbox: Sandbox) -> None:
     assert prompts[-1] == "/worldquant-researcher-workflow"
     last = sandbox.calls()[-1]
     assert last[last.index("--model") + 1] == "sonnet"
+
+
+VERIFIED_NAME = re.compile(r"guard-verified-9\.9\.9__Fake_Claude_-[0-9a-f]{12}")
+
+
+def test_verified_file_is_keyed_by_claude_version_and_guard_digest(sandbox: Sandbox) -> None:
+    assert sandbox.run().returncode == 0
+    (verified,) = sandbox.state.glob("guard-verified-*")
+    assert VERIFIED_NAME.fullmatch(verified.name), verified.name
+
+
+@pytest.mark.parametrize(
+    "stale",
+    [
+        "guard-verified-9.9.9__Fake_Claude_",  # written before the digest existed
+        "guard-verified-9.9.9__Fake_Claude_-000000000000",  # another guard / runner / settings
+    ],
+)
+def test_a_verification_of_other_guard_wiring_does_not_skip_the_self_test(sandbox: Sandbox, stale: str) -> None:
+    sandbox.state.mkdir()
+    (sandbox.state / stale).write_text("verified earlier\n", encoding="utf-8")
+
+    assert sandbox.run().returncode == 0
+
+    assert sandbox.prompts()[0].startswith("Tool permission self-test")
+    assert len([path for path in sandbox.state.glob("guard-verified-*") if VERIFIED_NAME.fullmatch(path.name)]) == 1
 
 
 def test_unwired_hook_fails_the_self_test_and_stops_the_loop(sandbox: Sandbox) -> None:
@@ -256,6 +284,22 @@ def test_claude_failing_before_any_tool_call_is_an_ordinary_failure(sandbox: San
     assert sandbox.stop_text() is None
     assert not list(sandbox.state.glob("guard-verified-*"))
     assert len(sandbox.prompts()) == 1
+
+
+def test_claude_exit_codes_that_collide_with_the_runners_are_reported_as_one(sandbox: Sandbox) -> None:
+    selftest = sandbox.run(FAKE_CLAUDE_SELFTEST="crash4")
+
+    assert selftest.returncode == 1
+    assert "claude exit=4" in selftest.stderr
+    assert sandbox.stop_text() is None
+
+    assert sandbox.run().returncode == 0
+    round_ = sandbox.run(FAKE_CLAUDE_ROUND="exit3")
+
+    assert round_.returncode == 1
+    assert "exit=3" in round_.stderr
+    assert sandbox.failures() == "1"
+    assert sandbox.stop_text() is None
 
 
 def test_round_without_any_guard_call_stops_the_loop(sandbox: Sandbox) -> None:

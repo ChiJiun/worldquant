@@ -52,7 +52,8 @@ def _decide(config, repo: Path, tool: str, tool_input: dict, cwd: str | None = N
         f"{PY} -m app research --mode auto",
         f"{PY} -m app attribute --candidate-id A_settings_001 --result-id abc123",
         f"{PY} -m app validate-candidate --candidate-id A.1 --refresh",
-        f"{PY} -m app fetch-correlations --refresh",
+        f"{PY} -m app fetch-correlations --refresh --limit 20",
+        f"{PY} -m app fetch-correlations --kind both --limit=1",
         f"{PY} -m app select-alphas --finalize-run --clear-candidates",
         f"{PY} -m app result abc123",
         f"{PY} -m app login-check",
@@ -137,6 +138,51 @@ def test_bash_checks_every_option_and_argument(config, repo: Path, command: str)
     assert _decide(config, repo, "Bash", {"command": command}) is not None
 
 
+@pytest.mark.parametrize(
+    "options",
+    [
+        "",
+        "--refresh",
+        "--alpha-id abc",
+        "--limit 0",
+        "--limit 21",
+        "--limit 500",
+        "--limit +5",
+        "--limit 1.5",
+        "--limit five",
+        "--limit=",
+    ],
+)
+def test_fetch_correlations_needs_a_small_limit(config, repo: Path, options: str) -> None:
+    command = f"{PY} -m app fetch-correlations {options}".strip()
+    assert _decide(config, repo, "Bash", {"command": command}) is not None
+
+
+def test_fetch_correlations_limit_bound_is_twenty() -> None:
+    assert guard.FETCH_CORRELATIONS_MAX_LIMIT == 20
+
+
+# Characters a shell would interpret. SAFE_COMMAND is the first of two layers
+# (_parse_options re-checks every word), so test it on its own: a command that
+# only differs from an allowed one by such a character must not match.
+SHELL_CHARACTERS = list(";&|<>$`'\"\\(){}[]*?~!#^") + ["\t", "\n", "\r", "\x00", "\u00a0"]
+
+
+@pytest.mark.parametrize("char", SHELL_CHARACTERS)
+def test_safe_command_rejects_shell_characters(char: str) -> None:
+    assert guard.SAFE_COMMAND.fullmatch(f"{PY} -m app result abc") is not None
+    assert guard.SAFE_COMMAND.fullmatch(f"{PY} -m app result a{char}b") is None
+
+
+def test_safe_command_accepts_exactly_its_documented_characters() -> None:
+    allowed = "ABCXYZabcxyz0123456789_.,:=@%+/ -"
+    assert guard.SAFE_COMMAND.fullmatch(allowed) is not None
+    for code in range(32, 127):
+        char = chr(code)
+        expected = char in allowed or char.isalnum()
+        assert (guard.SAFE_COMMAND.fullmatch(char) is not None) == expected, repr(char)
+
+
 def test_repeatable_option_is_the_only_one_that_may_repeat(config, repo: Path) -> None:
     command = f"{PY} -m app fetch-correlations --alpha-id abc --alpha-id def --limit 5"
     assert _decide(config, repo, "Bash", {"command": command}) is None
@@ -217,6 +263,9 @@ def test_read_blocks_an_absolute_path_outside_the_repository(config, repo: Path)
 
 
 def test_read_follows_symlinks_out_of_the_repository(config, repo: Path) -> None:
+    # Creating a symlink usually needs extra privileges on Windows, so this test
+    # skips there; test_paths_are_resolved_with_realpath covers the same rule on
+    # every platform without a real link.
     secret = repo.parent / "secret.txt"
     secret.write_text("x", encoding="utf-8")
     link = repo / "research" / "notes" / "link.md"
@@ -226,6 +275,23 @@ def test_read_follows_symlinks_out_of_the_repository(config, repo: Path) -> None
         pytest.skip("symlinks are not available here")
     assert _decide(config, repo, "Read", {"file_path": "research/notes/link.md"}) is not None
     assert _decide(config, repo, "Write", {"file_path": "research/notes/link.md"}) is not None
+
+
+def test_paths_are_resolved_with_realpath(config, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The guard must follow links (realpath), not just tidy the path (normpath)."""
+    outside = str(repo.parent / "secret.txt")
+    link = os.path.normcase(os.path.join(str(repo), "research", "notes", "link.md"))
+    real_realpath = os.path.realpath
+
+    def fake_realpath(path, *args, **kwargs):
+        if os.path.normcase(os.path.normpath(path)) == link:
+            return outside
+        return real_realpath(path, *args, **kwargs)
+
+    monkeypatch.setattr(guard.os.path, "realpath", fake_realpath)
+    assert _decide(config, repo, "Read", {"file_path": "research/notes/link.md"}) is not None
+    assert _decide(config, repo, "Write", {"file_path": "research/notes/link.md"}) is not None
+    assert _decide(config, repo, "Write", {"file_path": "research/notes/other.md"}) is None
 
 
 @pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit"])
@@ -248,6 +314,10 @@ def test_write_is_limited_to_the_candidate_file_and_markdown_notes(config, repo:
         "research/notes/.claude/rules/r.md",
         "research/notes/.hidden.md",
         "research/notes/2026/idea.md",
+        # Subdirectories whose own name looks like a valid note.
+        "research/notes/a.md/CLAUDE.md",
+        "research/notes/a.md/b.md",
+        "research/notes/x.md/.claude/rules/r.md",
         "research/notes/idea.MD",
         "research/notes/my idea.md",
         "research/notes/app/__main__.py",
@@ -288,6 +358,9 @@ def test_grep_needs_a_path_below_the_repository_root(config, repo: Path) -> None
     assert _decide(config, repo, "Grep", {"pattern": "WQ_", "path": ".env"}) is not None
     assert _decide(config, repo, "Grep", {"pattern": "x", "path": ".."}) is not None
     assert _decide(config, repo, "Grep", {"pattern": "x", "path": "research", "glob": "../**"}) is not None
+    # Brace alternatives expand to `..` or an absolute path after the check.
+    for glob in ("{..,x}/.env", "{/etc,x}/*", "*.{md,json}", "x}"):
+        assert _decide(config, repo, "Grep", {"pattern": "x", "path": "research", "glob": glob}) is not None
 
 
 def test_glob_stays_inside_the_repository(config, repo: Path) -> None:
@@ -298,6 +371,9 @@ def test_glob_stays_inside_the_repository(config, repo: Path) -> None:
     assert _decide(config, repo, "Glob", {"pattern": "../*"}) is not None
     assert _decide(config, repo, "Glob", {"pattern": "~/.ssh/*"}) is not None
     assert _decide(config, repo, "Glob", {"pattern": "*", "path": ".."}) is not None
+    assert _decide(config, repo, "Glob", {"pattern": "{..,x}/*"}) is not None
+    assert _decide(config, repo, "Glob", {"pattern": "{/etc,x}/*"}) is not None
+    assert _decide(config, repo, "Glob", {"pattern": "**/*.{md,json}"}) is not None
     assert _decide(config, repo, "Glob", {}) is not None
 
 
