@@ -175,3 +175,71 @@ def test_self_correlation_fetched_at_ignores_valueless_entries():
     assert self_correlation_fetched_at(cache, "valued") == "2026-05-01T00:00:00Z"
     assert self_correlation_fetched_at(cache, "mock") is None
     assert self_correlation_fetched_at(cache, "missing") is None
+
+
+def test_fetch_correlations_saves_cache_after_each_fetch_so_interruption_keeps_results(tmp_path):
+    cache_path = tmp_path / "alpha_correlations.json"
+
+    class InterruptedClient(MockBrainClient):
+        def fetch_self_correlation(self, alpha_id):
+            if alpha_id == "alpha-3":
+                raise KeyboardInterrupt
+            return super().fetch_self_correlation(alpha_id)
+
+    client = InterruptedClient(RateLimiter(0.0))
+    client.correlation_payloads[("alpha-1", "self")] = SELF_PAYLOAD
+    client.correlation_payloads[("alpha-2", "self")] = {**SELF_PAYLOAD, "max": 0.33}
+
+    with pytest.raises(KeyboardInterrupt):
+        fetch_correlations(client, ["alpha-1", "alpha-2", "alpha-3"], cache_path)
+
+    cache = load_correlation_cache(cache_path)
+    assert self_correlation_max(cache, "alpha-1") == 0.81
+    assert self_correlation_max(cache, "alpha-2") == 0.33
+    assert "alpha-3" not in cache
+    assert list(tmp_path.glob("*.tmp")) == []
+
+    # a re-run skips what the interrupted run already cached
+    report = fetch_correlations(client, ["alpha-1", "alpha-2"], cache_path)
+    assert {item["alpha_id"] for item in report["skipped"]} == {"alpha-1", "alpha-2"}
+    assert report["fetched"] == []
+
+
+def test_fetch_correlations_logs_one_progress_line_per_attempt(tmp_path, caplog):
+    cache_path = tmp_path / "alpha_correlations.json"
+
+    class FlakyClient(MockBrainClient):
+        def fetch_self_correlation(self, alpha_id):
+            if alpha_id == "alpha-bad":
+                raise RuntimeError("throttled for good")
+            return super().fetch_self_correlation(alpha_id)
+
+    client = FlakyClient(RateLimiter(0.0))
+    client.correlation_payloads[("alpha-1", "self")] = SELF_PAYLOAD
+    save_correlation_cache(cache_path, {"alpha-cached": {"self": {"max_correlation": 0.5, "records": []}}})
+
+    with caplog.at_level("INFO", logger="app.correlations"):
+        report = fetch_correlations(client, ["alpha-cached", "alpha-1", "alpha-bad", "alpha-4"], cache_path, limit=2)
+
+    assert report["stopped_at_limit"] is True
+    messages = [record.getMessage() for record in caplog.records if record.name == "app.correlations"]
+    assert messages[0] == "fetch-correlations: 2 to fetch, 1 cached and skipped (stopped at --limit)"
+    assert "fetch-correlations [1/2] alpha-1 self max_correlation=0.81" in messages
+    assert "fetch-correlations [2/2] alpha-bad self error RuntimeError: throttled for good" in messages
+    assert not any("alpha-4" in message for message in messages)
+
+
+def test_save_cache_is_atomic_and_keeps_previous_file_when_replace_fails(tmp_path, monkeypatch):
+    cache_path = tmp_path / "alpha_correlations.json"
+    save_correlation_cache(cache_path, {"alpha-1": {"self": {"max_correlation": 0.81, "records": []}}})
+    before = cache_path.read_text(encoding="utf-8")
+
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("app.correlations.os.replace", broken_replace)
+    with pytest.raises(OSError, match="disk full"):
+        save_correlation_cache(cache_path, {"alpha-2": {"self": {"max_correlation": 0.2, "records": []}}})
+
+    assert cache_path.read_text(encoding="utf-8") == before
+    assert list(tmp_path.glob("*.tmp")) == []

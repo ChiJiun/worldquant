@@ -16,8 +16,23 @@ from app.correlations import parse_correlation_payload
 from app.models import AlphaCandidate, CorrelationResult, SimulationHandle, SimulationMetrics, utc_now_iso
 
 MAX_RETRY_AFTER_SECONDS = 60.0
+# 429 THROTTLED handling for correlation endpoints. A throttled call is retried after BRAIN's
+# Retry-After (capped at THROTTLE_MAX_DELAY_SECONDS) or, without a usable header, after an
+# exponential backoff starting at THROTTLE_BACKOFF_BASE_SECONDS. The call gives up with
+# ThrottledError once THROTTLE_MAX_RETRIES retries are spent or the next wait would push the total
+# throttle wait past THROTTLE_MAX_TOTAL_WAIT_SECONDS. Throttled responses do not use up
+# WQ_MAX_POLL_ATTEMPTS, which only counts "still computing" polls.
+THROTTLE_STATUS_CODE = 429
+THROTTLE_MAX_RETRIES = 8
+THROTTLE_BACKOFF_BASE_SECONDS = 10.0
+THROTTLE_MAX_DELAY_SECONDS = 300.0
+THROTTLE_MAX_TOTAL_WAIT_SECONDS = 900.0
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ThrottledError(RuntimeError):
+    """BRAIN kept answering 429 after the bounded throttle retries."""
 
 
 class BrainClient(ABC):
@@ -125,22 +140,49 @@ class RequestsBrainClient(BrainClient):
         return self._fetch_correlation(alpha_id, "prod", self.settings.api_prod_corr_path)
 
     def _fetch_correlation(self, alpha_id: str, kind: str, path_template: str) -> CorrelationResult:
-        """GET a correlation endpoint, honouring BRAIN's Retry-After while the platform computes it."""
+        """GET a correlation endpoint, honouring BRAIN's Retry-After while the platform computes it.
+
+        A 429 response is retried with a bounded backoff (see ``THROTTLE_*``) and raises
+        ``ThrottledError`` when the budget runs out; any other status >= 400 raises ``RuntimeError``.
+        """
         if not self.logged_in:
             self.login()
         path = path_template.format(alpha_id=alpha_id)
         last_status: Optional[int] = None
-        for _ in range(self.settings.max_poll_attempts):
+        polls = 0
+        throttle_retries = 0
+        throttle_waited = 0.0
+        while polls < self.settings.max_poll_attempts:
             response = self._get(path)
             if response.status_code in {401, 403}:
                 self.logged_in = False
                 self.login()
                 response = self._get(path)
             last_status = response.status_code
+            if response.status_code == THROTTLE_STATUS_CODE:
+                delay = self._throttle_delay(self._header(response, "Retry-After"), throttle_retries)
+                if throttle_retries >= THROTTLE_MAX_RETRIES or throttle_waited + delay > THROTTLE_MAX_TOTAL_WAIT_SECONDS:
+                    raise ThrottledError(
+                        f"{kind} correlation fetch for {alpha_id} still throttled after {throttle_retries} retries "
+                        f"({throttle_waited:.0f}s waited): status={response.status_code} body={response.text[:1000]}"
+                    )
+                throttle_retries += 1
+                throttle_waited += delay
+                LOGGER.warning(
+                    "%s correlation for %s throttled (429); retry %d/%d in %.0fs",
+                    kind,
+                    alpha_id,
+                    throttle_retries,
+                    THROTTLE_MAX_RETRIES,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
             if response.status_code >= 400:
                 raise RuntimeError(
                     f"{kind} correlation fetch failed for {alpha_id}: status={response.status_code} body={response.text[:1000]}"
                 )
+            polls += 1
             data = self._safe_json(response)
             retry_after = self._header(response, "Retry-After")
             if retry_after is not None and not self._has_correlation_payload(data):
@@ -150,6 +192,26 @@ class RequestsBrainClient(BrainClient):
         raise TimeoutError(
             f"{kind} correlation for {alpha_id} was still computing after {self.settings.max_poll_attempts} polls (last status={last_status})"
         )
+
+    @staticmethod
+    def _throttle_delay(retry_after: Optional[str], retries_so_far: int) -> float:
+        """Seconds to wait after a 429.
+
+        A numeric ``Retry-After`` above zero is honoured, clamped to ``[1, THROTTLE_MAX_DELAY_SECONDS]``.
+        A missing, unparsable (for example HTTP-date) or non-positive header falls back to
+        ``THROTTLE_BACKOFF_BASE_SECONDS * 2 ** retries_so_far``, with the same cap.
+        """
+        delay: Optional[float] = None
+        if retry_after is not None:
+            try:
+                delay = float(retry_after)
+            except (TypeError, ValueError):
+                delay = None
+            if delay is not None and not delay > 0:
+                delay = None
+        if delay is None:
+            delay = THROTTLE_BACKOFF_BASE_SECONDS * (2 ** retries_so_far)
+        return min(max(delay, 1.0), THROTTLE_MAX_DELAY_SECONDS)
 
     def _retry_delay(self, retry_after: str) -> float:
         """Seconds to wait before polling a correlation endpoint again.
