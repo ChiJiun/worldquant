@@ -259,7 +259,9 @@ def test_a_verification_of_other_guard_wiring_does_not_skip_the_self_test(sandbo
     assert sandbox.run().returncode == 0
 
     assert sandbox.prompts()[0].startswith("Tool permission self-test")
-    assert len([path for path in sandbox.state.glob("guard-verified-*") if VERIFIED_NAME.fullmatch(path.name)]) == 1
+    # The stale "-000000000000" name also matches VERIFIED_NAME, so leave it out of the count.
+    fresh = [path for path in sandbox.state.glob("guard-verified-*") if VERIFIED_NAME.fullmatch(path.name) and path.name != stale]
+    assert len(fresh) == 1
 
 
 def test_unwired_hook_fails_the_self_test_and_stops_the_loop(sandbox: Sandbox) -> None:
