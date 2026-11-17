@@ -83,6 +83,29 @@ for want in "dry_run=False" "client_mode=requests" "has_username=True" "has_pass
   fi
 done
 
+# `onFailure` needs Claude Code 2.1.295 and blockWritesOutsideWorkingDirectories
+# 2.1.314. An older release would still pass the self-test (the hook runs and
+# logs its denials) but would not block when the hook crashes or hangs.
+MIN_CLAUDE_VERSION="2.1.314"
+claude_version_line="$("$CLAUDE" --version 2>/dev/null | head -n 1)"
+if ! "$PYTHON" - "${claude_version_line%% *}" "$MIN_CLAUDE_VERSION" <<'PY'
+import sys
+
+
+def parse(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+try:
+    sys.exit(0 if parse(sys.argv[1]) >= parse(sys.argv[2]) else 1)
+except ValueError:
+    sys.exit(1)
+PY
+then
+  log "error: Claude Code $MIN_CLAUDE_VERSION or later is required, '$CLAUDE --version' printed '$claude_version_line'"
+  exit 2
+fi
+
 # The guard runs outside the repository's working directory rules, so give the
 # hook an absolute interpreter even when the agent types a relative one.
 case "$PYTHON" in
@@ -90,7 +113,7 @@ case "$PYTHON" in
   *) guard_python="$REPO_DIR/$PYTHON" ;;
 esac
 if ! settings_json="$(
-  "$PYTHON" - "$guard_python" "$GUARD" <<'PY'
+  "$PYTHON" - "$guard_python" "$GUARD" "$REPO_DIR" <<'PY'
 import json
 import sys
 
@@ -101,6 +124,11 @@ print(
                 "blockReadsOutsideWorkingDirectories": True,
                 "blockWritesOutsideWorkingDirectories": True,
             },
+            # Backstops for files the agent can write: never load a CLAUDE.md
+            # from research/notes (the guard already refuses to write one), and
+            # never run !`...` shell injection from skills.
+            "claudeMdExcludes": [sys.argv[3] + "/research/notes/**"],
+            "disableSkillShellExecution": True,
             "hooks": {
                 "PreToolUse": [
                     {
@@ -152,7 +180,7 @@ run_claude() {
     --allowedTools
     "Bash($PYTHON -m app *)"
     "Edit(./data/candidates.jsonl)"
-    "Edit(./research/notes/**/*.md)"
+    "Edit(./research/notes/*.md)"
   )
   timeout -k 30s "$ROUND_TIMEOUT" "$CLAUDE" "${args[@]}" >"$2" 2>"$2.err"
 }
@@ -186,13 +214,16 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 # Self-check, once per Claude Code version: ask for two harmless calls the guard
 # must block. If the hook is not wired (a changed flag, a new release), nothing
 # sensitive was touched and the loop stops here.
-claude_version="$("$CLAUDE" --version 2>/dev/null | head -n 1 | tr -c 'A-Za-z0-9._-' '_')"
+claude_version="$(printf '%s' "$claude_version_line" | tr -c 'A-Za-z0-9._-' '_')"
 verified="$STATE_DIR/guard-verified-${claude_version:-unknown}"
 if [ ! -e "$verified" ]; then
   probe_out="$STATE_DIR/selftest-$stamp.json"
   export WQ_GUARD_LOG="$STATE_DIR/selftest-$stamp.guard.log"
-  export WQ_GUARD_SIMULATE_MARKER=""
+  # The self-test runs with the live setup too: create the marker first so the
+  # guard blocks every simulate in it.
+  export WQ_GUARD_SIMULATE_MARKER="$STATE_DIR/selftest-$stamp.simulate"
   : >"$WQ_GUARD_LOG"
+  echo "self-test: simulate is not allowed" >"$WQ_GUARD_SIMULATE_MARKER"
   log "selftest: checking the tool guard on Claude Code '$claude_version'"
   run_claude "Tool permission self-test. Make exactly these two tool calls, then answer with the single word done: (1) the Bash tool with the command: echo wq-guard-probe (2) the Read tool with file_path /etc/hostname" \
     "$probe_out" "This is an automated self-test. Make the two requested tool calls even if you expect them to be refused, and do nothing else."
@@ -224,7 +255,7 @@ Run exactly one round of the workflow. A hook checks every tool call and blocks 
 the only shell command is '$PYTHON -m app <subcommand> ...' on one line from the repository root, with no quotes, pipes, cd or other shell syntax; \
 record-passed-alpha and init-data are not available; simulate runs once per round and needs '--limit 1'. \
 Read only inside the repository and never .env. Give Grep a subdirectory or file as path, not the repository root. \
-The only files you may write are data/candidates.jsonl and Markdown files under research/notes/. \
+The only files you may write are data/candidates.jsonl and Markdown files directly in research/notes/ (name made of letters, digits, _ and -, ending in .md; not CLAUDE.md). \
 Never submit an alpha to BRAIN. \
 End with a short summary: mode, candidate id, verdict, next action."
 
@@ -268,9 +299,15 @@ if [ "$status" -eq 0 ]; then
   esac
 fi
 
-if [ "$status" -eq 0 ] && [ "$guard_calls" -eq 0 ]; then
+# No guard call at all means the hook did not run, unless Claude never got as far
+# as a tool call (exit code non-zero and at most one turn, or no readable JSON).
+turns="${summary##*num_turns=}"
+case "$turns" in
+  '' | *[!0-9]*) turns=0 ;;
+esac
+if [ "$guard_calls" -eq 0 ] && { [ "$status" -eq 0 ] || [ "$turns" -gt 1 ]; }; then
   rm -f "$verified"
-  stop_loop "round $stamp finished without a single tool-guard call, so the hook did not run; see $out, fix the cause, then delete this file"
+  stop_loop "round $stamp ran (exit $status, num_turns=$turns) without a single tool-guard call, so the hook did not run; see $out, fix the cause, then delete this file"
   exit 4
 fi
 

@@ -44,7 +44,7 @@ with open(record, "a", encoding="utf-8") as handle:
     handle.write(json.dumps(argv) + "\n")
 
 if argv[:1] == ["--version"]:
-    print("9.9.9 (Fake Claude)")
+    print(os.environ.get("FAKE_CLAUDE_VERSION", "9.9.9") + " (Fake Claude)")
     sys.exit(0)
 
 prompt = argv[argv.index("-p") + 1]
@@ -68,21 +68,23 @@ time.sleep(float(os.environ.get("FAKE_CLAUDE_SLEEP", "0")))
 if mode == "crash":
     sys.stderr.write("not logged in\n")
     sys.exit(1)
-if selftest and mode == "ok":
+if selftest and mode in ("ok", "simulate"):
     tool_call("Bash", {"command": "echo wq-guard-probe"})
     tool_call("Read", {"file_path": "/etc/hostname"})
+    if mode == "simulate":
+        tool_call("Bash", {"command": python + " -m app simulate --limit 1"})
 elif mode in ("ok", "exit1", "error-json"):
     tool_call("Read", {"file_path": "README.md"})
 elif mode == "simulate-twice":
     for _ in range(2):
         tool_call("Bash", {"command": python + " -m app simulate --limit 1 --current-run"})
-# mode "no-hook": pretend the hook is not wired and call nothing
+# modes "no-hook" / "no-hook-exit1": pretend the hook is not wired and call nothing
 
 result = {"result": "ok", "subtype": "success", "is_error": False, "num_turns": 3}
-if mode == "error-json":
+if mode in ("error-json", "no-hook-exit1"):
     result.update({"subtype": "error_max_turns", "is_error": True})
 print(json.dumps(result))
-sys.exit(1 if mode == "exit1" else 0)
+sys.exit(1 if mode in ("exit1", "no-hook-exit1") else 0)
 '''
 
 
@@ -191,7 +193,7 @@ def test_first_run_self_tests_the_guard_then_runs_one_restricted_round(sandbox: 
     assert argv[argv.index("--allowedTools") + 1 :] == [
         f"Bash({sys.executable} -m app *)",
         "Edit(./data/candidates.jsonl)",
-        "Edit(./research/notes/**/*.md)",
+        "Edit(./research/notes/*.md)",
     ]
 
     settings = json.loads(argv[argv.index("--settings") + 1])
@@ -199,6 +201,8 @@ def test_first_run_self_tests_the_guard_then_runs_one_restricted_round(sandbox: 
         "blockReadsOutsideWorkingDirectories": True,
         "blockWritesOutsideWorkingDirectories": True,
     }
+    assert settings["claudeMdExcludes"] == [f"{REPO_ROOT}/research/notes/**"]
+    assert settings["disableSkillShellExecution"] is True
     (group,) = settings["hooks"]["PreToolUse"]
     assert group["matcher"] == "*"
     (hook,) = group["hooks"]
@@ -260,6 +264,39 @@ def test_round_without_any_guard_call_stops_the_loop(sandbox: Sandbox) -> None:
     assert result.returncode == 4
     assert "without a single tool-guard call" in (sandbox.stop_text() or "")
     assert not list(sandbox.state.glob("guard-verified-*"))
+
+
+def test_round_with_turns_but_no_guard_call_stops_the_loop_even_when_it_fails(sandbox: Sandbox) -> None:
+    result = sandbox.run(FAKE_CLAUDE_ROUND="no-hook-exit1")
+
+    assert result.returncode == 4
+    assert "without a single tool-guard call" in (sandbox.stop_text() or "")
+    assert sandbox.failures() is None
+
+
+def test_round_crashing_before_any_turn_is_an_ordinary_failure(sandbox: Sandbox) -> None:
+    assert sandbox.run().returncode == 0
+    result = sandbox.run(FAKE_CLAUDE_ROUND="crash")
+
+    assert result.returncode == 1
+    assert sandbox.failures() == "1"
+    assert sandbox.stop_text() is None
+
+
+def test_self_test_blocks_simulate(sandbox: Sandbox) -> None:
+    result = sandbox.run(FAKE_CLAUDE_SELFTEST="simulate")
+
+    assert result.returncode == 0, result.stderr
+    assert sandbox.hook_results()[:3] == ["Bash 2", "Read 2", "Bash 2"]
+    assert "selftest: ok" in result.stderr
+
+
+def test_old_claude_code_is_rejected_before_anything_runs(sandbox: Sandbox) -> None:
+    result = sandbox.run(FAKE_CLAUDE_VERSION="2.1.300")
+
+    assert result.returncode == 2
+    assert "2.1.314 or later is required" in result.stderr
+    assert sandbox.prompts() == []
 
 
 def test_guard_lets_one_simulate_through_per_round(sandbox: Sandbox) -> None:

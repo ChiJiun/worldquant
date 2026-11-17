@@ -47,9 +47,10 @@ ALLOWED_SUBCOMMANDS = frozenset(
     }
 )
 
-# Whole-command whitelist: no quotes, no shell operators, no expansion, no
-# newlines. With nothing to interpret, bash and this file split the command the
-# same way, on spaces.
+# Whole-command whitelist: no quotes, no shell operators, no expansion, no tabs
+# or newlines. With nothing to interpret, bash and this file split the command
+# the same way, on spaces. _parse_options re-checks every word afterwards, so
+# this is the first of two layers; it is also what rejects other whitespace.
 SAFE_COMMAND = re.compile(r"[A-Za-z0-9_.,:=@%+/ -]+")
 
 READ_TOOLS = frozenset({"Read"})
@@ -114,15 +115,30 @@ def check_read(path: Any, config: GuardConfig, base: str) -> Optional[str]:
     return None
 
 
+# Notes are plain Markdown files directly in research/notes/. No subdirectories
+# and no dot names, so the agent cannot plant a CLAUDE.md (loaded and @-import
+# expanded by Claude Code without any tool call), a .claude/ skill or rule, or
+# anything else Claude Code reads as instructions.
+NOTE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\.md")
+RESERVED_NOTE_NAMES = frozenset({"claude.md", "agents.md", "skill.md"})
+
+
 def check_write(path: Any, config: GuardConfig, base: str) -> Optional[str]:
     if not isinstance(path, str) or not path:
         return "no file path given"
     relative = _relative_to_repo(path, config, base)
     if relative == "data/candidates.jsonl":
         return None
-    if relative is not None and relative.startswith("research/notes/") and relative.endswith(".md"):
-        return None
-    return "the only writable files are data/candidates.jsonl and research/notes/**/*.md"
+    if relative is not None:
+        parts = relative.split("/")
+        if (
+            len(parts) == 3
+            and parts[:2] == ["research", "notes"]
+            and NOTE_NAME.fullmatch(parts[2]) is not None
+            and parts[2].lower() not in RESERVED_NOTE_NAMES
+        ):
+            return None
+    return "the only writable files are data/candidates.jsonl and research/notes/<name>.md (letters, digits, _ and -; not CLAUDE.md)"
 
 
 def check_grep(tool_input: Dict[str, Any], config: GuardConfig, base: str) -> Optional[str]:
@@ -305,7 +321,9 @@ def decide(payload: Any, config: GuardConfig) -> Optional[str]:
     if tool == "Skill":
         if tool_input.get("skill") == SKILL_NAME:
             return None
-        return "only the %s skill may be loaded" % SKILL_NAME
+        # The Skill tool's input fields are not documented; log the key names
+        # (never the values) so a supervised run shows what Claude Code sends.
+        return "only the %s skill may be loaded (tool_input keys: %s)" % (SKILL_NAME, ", ".join(sorted(tool_input)) or "none")
     if tool in HARMLESS_TOOLS:
         return None
     return "tool %s is not available to an unattended round" % tool

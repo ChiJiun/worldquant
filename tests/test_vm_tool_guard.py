@@ -108,6 +108,10 @@ def test_bash_must_run_from_the_repository_root(config, repo: Path) -> None:
     "command",
     [
         # `;` and `&` as separate words: the guard must not rely on them sticking to the subcommand.
+        f"{PY} -m pip settings",
+        f"{PY} -c help settings",
+        # Only SAFE_COMMAND rejects this one: str.split() would accept the tab.
+        f"{PY} -m app research --mode\tauto",
         f"{PY} -m app settings ; cat .env",
         f"{PY} -m app settings & id",
         f"{PY} -m app settings\tx",
@@ -225,7 +229,7 @@ def test_read_follows_symlinks_out_of_the_repository(config, repo: Path) -> None
 
 
 @pytest.mark.parametrize("tool", ["Write", "Edit", "MultiEdit"])
-@pytest.mark.parametrize("path", ["data/candidates.jsonl", "research/notes/idea.md", "research/notes/2026/idea.md"])
+@pytest.mark.parametrize("path", ["data/candidates.jsonl", "research/notes/idea.md", "research/notes/hypotheses.md", "research/notes/round_2026-11-17.md"])
 def test_write_is_limited_to_the_candidate_file_and_markdown_notes(config, repo: Path, tool: str, path: str) -> None:
     assert _decide(config, repo, tool, {"file_path": path}) is None
 
@@ -233,6 +237,19 @@ def test_write_is_limited_to_the_candidate_file_and_markdown_notes(config, repo:
 @pytest.mark.parametrize(
     "path",
     [
+        # Claude Code loads these as instructions without a tool call.
+        "research/notes/CLAUDE.md",
+        "research/notes/claude.md",
+        "research/notes/CLAUDE.local.md",
+        "research/notes/AGENTS.md",
+        "research/notes/SKILL.md",
+        "research/notes/sub/CLAUDE.local.md",
+        "research/notes/.claude/skills/x/SKILL.md",
+        "research/notes/.claude/rules/r.md",
+        "research/notes/.hidden.md",
+        "research/notes/2026/idea.md",
+        "research/notes/idea.MD",
+        "research/notes/my idea.md",
         "research/notes/app/__main__.py",
         "research/notes/run.sh",
         "research/notes/idea.md/../../state/family_memory.json",
@@ -292,7 +309,8 @@ def test_unknown_and_network_tools_are_blocked(config, repo: Path, tool: str) ->
 def test_bookkeeping_tools_and_the_workflow_skill_pass(config, repo: Path) -> None:
     assert _decide(config, repo, "TodoWrite", {"todos": []}) is None
     assert _decide(config, repo, "Skill", {"skill": "worldquant-researcher-workflow"}) is None
-    assert _decide(config, repo, "Skill", {"skill": "other-skill"}) is not None
+    denied = _decide(config, repo, "Skill", {"skill": "other-skill", "args": "secret-value"})
+    assert denied is not None and "tool_input keys: args, skill" in denied and "secret-value" not in denied
     assert _decide(config, repo, "Skill", {"skill": "evil:worldquant-researcher-workflow"}) is not None
     assert _decide(config, repo, "Skill", {}) is not None
 
