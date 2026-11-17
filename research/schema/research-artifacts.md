@@ -43,4 +43,6 @@ Submitted alpha rows should include at least `alpha_id` and `expression`. When `
 
 A file whose `version` is not the current `CACHE_VERSION` (version 1 files may contain `0.0` values written by an early mock client) or that is not valid JSON loads as an empty cache with a warning in the log. Before the next write it is renamed to `alpha_correlations.json.v<old>` or `alpha_correlations.json.corrupt` (a counter is appended when that name exists) and the `fetch-correlations` report lists it as `previous_cache_backup`; nothing is overwritten.
 
+The file is rewritten after every successful fetch (not only at the end of the run), through a temporary file in the same directory swapped in with `os.replace`, so an interrupted run keeps every entry fetched so far and never leaves a half-written cache. Failed fetches are not written; a re-run fetches them again.
+
 Use `--finalize-run` to write the structured final state. Use `--clear-candidates` only after the current candidate input has already been simulated and selected. `passed_alphas.csv` remains cumulative because removing it would erase the candidate pool needed for future clustering.

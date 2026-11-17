@@ -427,6 +427,9 @@ C:\Users\USER\anaconda3\python.exe -m app fetch-correlations --limit 20 --refres
 - `--kind self|prod|both`：self 是跟自己帳號已提交 alpha 的相關性（BRAIN 提交門檻 0.7），`select-alphas` 只用這個。prod 是跟全平台 alpha 的相關性分布，目前只存進快取供人工參考，selection 不使用。
 - 已快取（有數值）的 alpha 預設跳過；`--refresh` 強制重抓，提交新 alpha 後記得跑一次。`--limit N` 限制這次最多打 N 次 API（失敗的呼叫也算），方便分批。
 - BRAIN 計算中會回 `Retry-After`，程式會照平台要求等待：上限 60 秒，下限是 `WQ_POLL_INTERVAL_SECONDS`（沒設時至少 1 秒），而且下限優先，所以設定間隔超過 60 秒時仍以設定為準；最多重試 `WQ_MAX_POLL_ATTEMPTS` 次。
+- BRAIN 限流回 `429`（例如 `{"detail":"THROTTLED"}`）時會退避重試：有數值的 `Retry-After` 就照它等（夾在 1–300 秒），沒有、無法解析或不是正數時從 10 秒開始倍增（同樣上限 300 秒）；每次呼叫最多重試 8 次、限流累計等待最多 900 秒（下一次等待會超過就不等），用完才把這條記進報告的 `errors`（`error_type` 是 `ThrottledError`）並繼續下一條。429 不佔用 `WQ_MAX_POLL_ATTEMPTS`。這些上限是 `app/api/clients.py` 的 `THROTTLE_*` 常數，沒有環境變數。
+- 每成功抓到一筆就寫一次快取（先寫同目錄暫存檔再 `os.replace`，中斷時不會留下寫一半的檔），所以中途 Ctrl+C 或背景執行被砍掉時，已抓到的結果會保留，重跑會當成已快取跳過。失敗的呼叫不寫入快取，重跑會再抓。
+- 每次呼叫都會印一行進度 log 到 stderr（也會寫進 `WQ_LOG_DIR/app.log`）：成功是 `fetch-correlations [i/n] <alpha id> <kind> max_correlation=<值>`，失敗是 `fetch-correlations [i/n] <alpha id> <kind> error <例外類型>: <訊息>`；開始前先印一行這次要抓幾筆、跳過幾筆已快取。被限流時另有 `throttled (429); retry k/8 in Ns` 的 WARNING。最後的 JSON 報告仍印在 stdout。
 - 在 `WQ_DRY_RUN=true` 或 mock client 下這個指令會直接報錯：mock 寫入的結果會被當成「平台已確認不相關」，讓已提交 gate 失效。只有為了跑通流程時加 `--allow-mock`，此時寫入的是沒有數值的空項目，`select-alphas` 會視為沒有快取，之後 live 執行也會把它重抓；報告裡的 `fetched_at` 只會對有數值的項目印出。
 - 快取檔格式版本是 2。版本不符（例如舊版 1，可能含早期 mock 寫出的 `0.0`）或不是合法 JSON 的檔會被當成空的並寫 log，寫入新快取前會把舊檔改名為 `alpha_correlations.json.v1` / `alpha_correlations.json.corrupt`（已存在就加流水號），報告帶 `previous_cache_status` 與 `previous_cache_backup`。升版後舊的 live 快取要重抓一次。
 

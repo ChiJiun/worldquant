@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.api import MockBrainClient, RateLimiter, RequestsBrainClient
+from app.api import MockBrainClient, RateLimiter, RequestsBrainClient, ThrottledError
 from app.models import AlphaCandidate
 
 
@@ -124,8 +124,8 @@ def test_requests_client_fetch_result_parses_nested_is_checks(settings):
     assert metrics.checks_failed == 1
 
 
-def _correlation_response(status_code=200, payload=None, retry_after=None):
-    response = Mock(status_code=status_code, content=b"{}" if payload is not None else b"", text="")
+def _correlation_response(status_code=200, payload=None, retry_after=None, text=""):
+    response = Mock(status_code=status_code, content=b"{}" if payload is not None else b"", text=text)
     response.json.return_value = payload if payload is not None else {}
     response.headers = {"Retry-After": retry_after} if retry_after is not None else {}
     return response
@@ -213,3 +213,132 @@ def test_requests_client_retry_delay_respects_platform_and_floor(settings, poll_
     client = RequestsBrainClient(settings, RateLimiter(0.0))
 
     assert client._retry_delay(retry_after) == expected
+
+
+SELF_CORRELATION_PAYLOAD = {
+    "schema": {"properties": [{"name": "id"}, {"name": "correlation"}]},
+    "records": [["alpha-9", 0.42]],
+    "max": 0.42,
+    "min": 0.42,
+}
+
+
+def _throttled(retry_after=None):
+    return _correlation_response(status_code=429, retry_after=retry_after, text='{"detail":"THROTTLED"}')
+
+
+def _logged_in_client(settings):
+    settings.auth_mode = "basic"
+    client = RequestsBrainClient(settings, RateLimiter(0.0))
+    client.logged_in = True
+    return client
+
+
+def test_requests_client_retries_429_honouring_retry_after_without_using_poll_attempts(settings, monkeypatch):
+    settings.max_poll_attempts = 1
+    client = _logged_in_client(settings)
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    client.session.get = Mock(side_effect=[
+        _throttled(retry_after="7"),
+        _throttled(retry_after="3"),
+        _correlation_response(payload=SELF_CORRELATION_PAYLOAD),
+    ])
+
+    result = client.fetch_self_correlation("alpha-1")
+
+    assert result.max_correlation == 0.42
+    assert sleeps == [7.0, 3.0]
+    assert client.session.get.call_count == 3
+
+
+def test_requests_client_429_without_usable_retry_after_backs_off_exponentially(settings, monkeypatch):
+    client = _logged_in_client(settings)
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    client.session.get = Mock(side_effect=[
+        _throttled(),
+        _throttled(retry_after="Wed, 21 Oct 2026 07:28:00 GMT"),
+        _throttled(retry_after="0"),
+        _correlation_response(payload=SELF_CORRELATION_PAYLOAD),
+    ])
+
+    result = client.fetch_self_correlation("alpha-1")
+
+    assert result.max_correlation == 0.42
+    assert sleeps == [10.0, 20.0, 40.0]
+
+
+def test_requests_client_429_after_relogin_is_retried(settings, monkeypatch):
+    client = _logged_in_client(settings)
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: None)
+    client.login = Mock()
+    client.session.get = Mock(side_effect=[
+        _correlation_response(status_code=401),
+        _throttled(retry_after="2"),
+        _correlation_response(payload=SELF_CORRELATION_PAYLOAD),
+    ])
+
+    assert client.fetch_self_correlation("alpha-1").max_correlation == 0.42
+    client.login.assert_called_once()
+
+
+def test_requests_client_gives_up_after_max_throttle_retries(settings, monkeypatch):
+    monkeypatch.setattr("app.api.clients.THROTTLE_MAX_RETRIES", 3)
+    client = _logged_in_client(settings)
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    client.session.get = Mock(return_value=_throttled(retry_after="1"))
+
+    with pytest.raises(ThrottledError, match="still throttled after 3 retries") as excinfo:
+        client.fetch_self_correlation("alpha-1")
+
+    assert isinstance(excinfo.value, RuntimeError)
+    assert "THROTTLED" in str(excinfo.value)
+    assert sleeps == [1.0, 1.0, 1.0]
+    assert client.session.get.call_count == 4
+
+
+def test_requests_client_gives_up_when_next_throttle_wait_exceeds_total_budget(settings, monkeypatch):
+    monkeypatch.setattr("app.api.clients.THROTTLE_MAX_TOTAL_WAIT_SECONDS", 25.0)
+    client = _logged_in_client(settings)
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    client.session.get = Mock(return_value=_throttled(retry_after="10"))
+
+    with pytest.raises(ThrottledError, match=r"2 retries \(20s waited\)"):
+        client.fetch_prod_correlation("alpha-1")
+
+    assert sleeps == [10.0, 10.0]  # a third 10s wait would push the total to 30s > 25s
+
+
+def test_requests_client_non_throttle_error_still_raises_immediately(settings, monkeypatch):
+    client = _logged_in_client(settings)
+    sleeps = []
+    monkeypatch.setattr("app.api.clients.time.sleep", lambda seconds: sleeps.append(seconds))
+    client.session.get = Mock(return_value=_correlation_response(status_code=500, text="server error"))
+
+    with pytest.raises(RuntimeError, match="status=500") as excinfo:
+        client.fetch_self_correlation("alpha-1")
+
+    assert not isinstance(excinfo.value, ThrottledError)
+    assert sleeps == []
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "retries_so_far", "expected"),
+    [
+        ("30", 0, 30.0),  # honour the platform
+        ("0.2", 0, 1.0),  # never below one second
+        ("100000", 0, 300.0),  # capped so one header cannot stall the run
+        (None, 0, 10.0),  # no header: exponential backoff from the base
+        (None, 2, 40.0),
+        (None, 10, 300.0),  # backoff is capped too
+        ("abc", 1, 20.0),  # unparsable header falls back to backoff
+        ("-5", 0, 10.0),
+        ("nan", 0, 10.0),
+        ("inf", 0, 300.0),
+    ],
+)
+def test_requests_client_throttle_delay(retry_after, retries_so_far, expected):
+    assert RequestsBrainClient._throttle_delay(retry_after, retries_so_far) == expected

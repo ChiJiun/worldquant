@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import json
 import logging
+import os
+import shutil
+import tempfile
 
 from app.models import CorrelationResult, utc_now_iso
 
@@ -105,11 +108,27 @@ def inspect_correlation_cache(path: Path) -> Tuple[str, Any]:
 
 
 def save_correlation_cache(path: Path, cache: Dict[str, Dict[str, Any]]) -> Optional[Path]:
-    """Write the cache; a corrupt or stale-version file at ``path`` is renamed first and its new path returned."""
+    """Write the cache; a corrupt or stale-version file at ``path`` is renamed first and its new path returned.
+
+    The JSON is written to a temporary file next to ``path`` and swapped in with ``os.replace``, so an
+    interrupted write (Ctrl+C, a killed background run) leaves the previous cache intact instead of a
+    truncated file that would load as corrupt. An existing file's permission bits are kept.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     backup = backup_unusable_correlation_cache(path)
     payload = {"version": CACHE_VERSION, "updated_at": utc_now_iso(), "alphas": cache}
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    text = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)
+    descriptor, temp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        if path.exists():
+            shutil.copymode(path, temp_path)
+        os.replace(temp_path, path)
+    except BaseException:
+        temp_path.unlink(missing_ok=True)
+        raise
     return backup
 
 
@@ -217,6 +236,10 @@ def fetch_correlations(
     ``limit`` caps the number of API calls, failed calls included (entries skipped as cached do not
     count), so a rate-limited session can be resumed by re-running the command. Entries without a
     ``max_correlation`` value (for example written by the mock client) are not treated as cached.
+
+    The cache is saved after every successful fetch, so an interrupted run keeps what it already
+    fetched and a re-run skips those entries. Each attempt logs one progress line (``[i/n]``, alpha
+    id, kind, ``max_correlation`` or the error) at INFO / WARNING level, which the CLI sends to stderr.
     """
     for kind in kinds:
         if kind not in CORRELATION_KINDS:
@@ -227,31 +250,46 @@ def fetch_correlations(
     skipped: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     requested = [alpha_id for alpha_id in dict.fromkeys(str(value).strip() for value in alpha_ids) if alpha_id]
-    fetch_count = 0
-    stopped_at_limit = False
+    pending: List[Tuple[str, str]] = []
     for alpha_id in requested:
         for kind in kinds:
             if not refresh and is_cached(cache, alpha_id, kind):
                 skipped.append({"alpha_id": alpha_id, "kind": kind, "reason": "cached"})
-                continue
-            if limit is not None and fetch_count >= limit:
-                stopped_at_limit = True
-                continue
-            fetch_count += 1
-            try:
-                result = client.fetch_self_correlation(alpha_id) if kind == SELF_KIND else client.fetch_prod_correlation(alpha_id)
-            except Exception as exc:  # noqa: BLE001 - keep going and report per alpha
-                errors.append({"alpha_id": alpha_id, "kind": kind, "error_type": exc.__class__.__name__, "error": str(exc)})
-                continue
-            update_correlation_cache(cache, result)
-            fetched.append({
-                "alpha_id": alpha_id,
-                "kind": kind,
-                "max_correlation": result.max_correlation,
-                "min_correlation": result.min_correlation,
-                "record_count": len(result.records),
-            })
-    backup = save_correlation_cache(cache_path, cache)
+            else:
+                pending.append((alpha_id, kind))
+    stopped_at_limit = limit is not None and len(pending) > limit
+    if limit is not None:
+        pending = pending[:limit]
+    total = len(pending)
+    LOGGER.info(
+        "fetch-correlations: %d to fetch, %d cached and skipped%s",
+        total,
+        len(skipped),
+        " (stopped at --limit)" if stopped_at_limit else "",
+    )
+    backup: Optional[Path] = None
+    for index, (alpha_id, kind) in enumerate(pending, start=1):
+        try:
+            result = client.fetch_self_correlation(alpha_id) if kind == SELF_KIND else client.fetch_prod_correlation(alpha_id)
+        except Exception as exc:  # noqa: BLE001 - keep going and report per alpha
+            errors.append({"alpha_id": alpha_id, "kind": kind, "error_type": exc.__class__.__name__, "error": str(exc)})
+            LOGGER.warning(
+                "fetch-correlations [%d/%d] %s %s error %s: %s", index, total, alpha_id, kind, exc.__class__.__name__, exc
+            )
+            continue
+        update_correlation_cache(cache, result)
+        fetched.append({
+            "alpha_id": alpha_id,
+            "kind": kind,
+            "max_correlation": result.max_correlation,
+            "min_correlation": result.min_correlation,
+            "record_count": len(result.records),
+        })
+        backup = save_correlation_cache(cache_path, cache) or backup
+        LOGGER.info(
+            "fetch-correlations [%d/%d] %s %s max_correlation=%s", index, total, alpha_id, kind, result.max_correlation
+        )
+    backup = save_correlation_cache(cache_path, cache) or backup
     report = {
         "cache_path": str(cache_path),
         "requested_alpha_count": len(requested),
